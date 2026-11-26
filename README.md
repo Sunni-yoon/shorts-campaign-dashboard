@@ -2,7 +2,7 @@
 
 키워드(=캠페인 주제)별 YouTube 쇼츠 성과를 수집해 지표로 만들고, 브랜드가 의사결정에 쓸 수 있는 대시보드로 보여 주는 프로젝트입니다.
 
-**대시보드:** (배포 후 추가)
+**대시보드:** https://shorts-campaign-dashboard-fiegkrrdeazp5sdzj3gbxm.streamlit.app/
 
 대시보드는 결정 질문 순서로 구성되어 있습니다.
 
