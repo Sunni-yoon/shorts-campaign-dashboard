@@ -294,6 +294,7 @@ if not tot.empty:
         + (f", 미수집·오류 {t0['excluded_other']}개" if t0["excluded_other"] else "")
         + f" · 감성·구매의향은 댓글 하나씩 LLM 분류 ({config.COMMENT_MODEL}, 프롬프트 {config.COMMENT_PROMPT_VERSION})"
         " · 개인정보 보호를 위해 댓글 원문은 표시하지 않음")
+st.warning(f"**해석 주의** · {config.COMMENT_TARGET_LIMITATION}.")
 
 # ---------------------------------------------------------------- 3. 크리에이터
 channels_all = metrics.summary_by_channel(df)
@@ -479,6 +480,7 @@ st.warning(
     f"""
 - **포맷은 제목·설명 기반 LLM 분류입니다** (영상 내용은 보지 않음). {config.FORMAT_VALIDATION_NOTE}.
 - **댓글 반응:** {config.COMMENT_CAVEAT}.
+- **댓글 감성의 대상:** {config.COMMENT_TARGET_LIMITATION}.
 - **무작위 표본이 아닙니다.** 키워드 검색의 관련도 상위 영상이라 성과가 좋은 영상 쪽으로 치우쳐 있을 수 있습니다.
 - **공유 수·시청 시간·비용·전환은 포함하지 않습니다.** YouTube Data API가 제공하지 않습니다.
 - **광고 조회수와 자연 조회수를 구분할 수 없습니다.**

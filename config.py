@@ -74,6 +74,10 @@ COMMENT_PROMPT_VERSION = "v2"         # v1: reasoning none (부분 실패, 사�
 COMMENT_WORKERS = 8                   # 댓글은 하나씩 독립 분류하되 동시에 여러 요청 (시간 단축)
 COMMENT_CAVEAT = ("댓글은 관련도 상위 20개만 분석, 댓글 작성자는 시청자 일부라 전체 반응을 대표하지 않음, "
                   "긍정 댓글이 실제 구매로 이어지는지는 알 수 없음")
+COMMENT_TARGET_LIMITATION = (
+    "감성은 댓글 전체 분위기 기준이며 대상(제품·출연자·연출)을 구분하지 않음. buldak challenge 부정 댓글 "
+    "20개를 직접 확인한 결과 제품에 대한 부정은 2개였고, 나머지는 출연자 놀림·매운맛 리액션·영상 진정성 의심·"
+    "밈이었음. 감성 분석을 브랜드 판단에 쓰려면 감성의 대상(제품·출연자·연출)을 구분해야 한다는 한계를 확인했음")
 
 FORMAT_ACCURACY_SAMPLE = 50           # format_eval.py 표본 크기 (정확도 검증은 생략하기로 결정 — CLAUDE.md)
 FORMAT_VALIDATION_NOTE = ("사람이 50개를 직접 라벨링한 결과 약 15개(30%)는 한 영상에 여러 포맷이 섞여 "
