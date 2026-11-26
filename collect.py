@@ -463,17 +463,17 @@ def explain_error(error: str | None) -> str:
         return ""
     e = error
     if "quotaExceeded" in e or "dailyLimitExceeded" in e:
-        hint = "YouTube API 하루 할당량(10,000유닛)을 모두 썼습니다. 미국 태평양 시간 자정에 초기화됩니다."
+        hint = "YouTube API 하루 할당량(10,000유닛)을 모두 씀. 미국 태평양 시간 자정에 초기화됨."
     elif "keyInvalid" in e or "API key not valid" in e or ("badRequest" in e and "key" in e.lower()):
-        hint = "API 키가 올바르지 않습니다. Secrets(배포) 또는 .env(로컬)의 YOUTUBE_API_KEY를 확인하세요."
+        hint = "API 키가 올바르지 않음. Secrets(배포) 또는 .env(로컬)의 YOUTUBE_API_KEY 확인 필요."
     elif "accessNotConfigured" in e or "SERVICE_DISABLED" in e or "has not been used" in e:
-        hint = "이 키의 Google Cloud 프로젝트에서 YouTube Data API v3가 활성화되어 있지 않습니다."
+        hint = "이 키의 Google Cloud 프로젝트에서 YouTube Data API v3가 활성화되어 있지 않음."
     elif "forbidden" in e.lower() or "HTTP 403" in e:
-        hint = "API 접근이 거부되었습니다. 키의 API 제한·사용 설정을 확인하세요."
+        hint = "API 접근이 거부됨. 키의 API 제한·사용 설정 확인 필요."
     elif any(s in e for s in ("Timeout", "ConnectionError", "ServerNotFound", "socket", "SSLError")):
-        hint = "YouTube API 서버에 연결하지 못했습니다(네트워크 오류). 잠시 후 다시 시도됩니다."
+        hint = "YouTube API 서버에 연결하지 못함(네트워크 오류). 잠시 후 다시 시도함."
     else:
-        hint = "수집 중 오류가 발생했습니다."
+        hint = "수집 중 오류 발생."
     return f"{hint} (원문: {e})"
 
 

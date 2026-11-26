@@ -73,14 +73,14 @@ needed, last_seen = auto_collect.check(config.DB_PATH)
 outcome = {"action": "none", "last_success": last_seen, "error": None}
 if needed and config.AUTO_COLLECT:
     with st.status(f"데이터 수집 중 — 데이터가 없거나 마지막 수집 후 {config.REFRESH_HOURS}시간이 지나 "
-                   "YouTube에서 새로 검색합니다 (약 1분, 페이지를 닫지 마세요)", expanded=True) as box:
+                   "YouTube에서 새로 검색함 (약 1분, 페이지를 닫지 말 것)", expanded=True) as box:
         outcome = auto_collect.ensure_fresh_data(collector_state(), config.DB_PATH, progress=box.write)
         if outcome["action"] == "collected":
             box.update(label=f"수집 완료 ({_fmt_run(outcome['last_success'])})", state="complete", expanded=False)
         elif outcome["action"] == "none":
-            box.update(label="다른 방문자가 방금 수집을 마쳤습니다", state="complete", expanded=False)
+            box.update(label="다른 방문자가 방금 수집을 마침", state="complete", expanded=False)
         else:
-            box.update(label="수집하지 못했습니다", state="error", expanded=False)
+            box.update(label="수집하지 못함", state="error", expanded=False)
 elif needed:
     outcome = {"action": "disabled", "last_success": last_seen, "error": None}
 
@@ -88,16 +88,16 @@ action, last_ok = outcome["action"], outcome["last_success"]
 if action in ("failed", "retry_wait"):
     msg = collect.explain_error(outcome["error"])          # 키는 이미 *** 로 가려진 메시지
     if action == "retry_wait":
-        msg += f" — {_fmt_run(outcome['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도합니다."
+        msg += f" — {_fmt_run(outcome['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도함."
     st.error(f"데이터 수집 실패: {msg}")
 elif action == "no_key":
-    st.error(f"API 키가 설정되지 않아 수집할 수 없습니다. 배포 환경은 Streamlit Secrets에 "
-             f'`{keys.KEY_NAME} = "..."`를, 로컬은 .env에 `{keys.KEY_NAME}=...`를 넣어 주세요.')
+    st.error(f"API 키가 설정되지 않아 수집할 수 없음. 배포 환경은 Streamlit Secrets에 "
+             f'`{keys.KEY_NAME} = "..."`를, 로컬은 .env에 `{keys.KEY_NAME}=...`를 넣어야 함.')
 elif action == "disabled":
-    st.info("자동 수집이 꺼져 있습니다 (AUTO_COLLECT=0). `collect.py search`로 직접 수집하세요.")
+    st.info("자동 수집이 꺼져 있음 (AUTO_COLLECT=0). `collect.py search`로 직접 수집 필요.")
 if action in ("failed", "retry_wait", "no_key", "disabled") and last_ok:
-    st.warning(f"마지막 성공 수집({_fmt_run(last_ok)}) 데이터를 표시합니다. "
-               f"{config.REFRESH_HOURS}시간이 지난 데이터입니다.")
+    st.warning(f"마지막 성공 수집({_fmt_run(last_ok)}) 데이터를 표시함. "
+               f"{config.REFRESH_HOURS}시간이 지난 데이터임.")
 
 # ---------------------------------------------------------------- 포맷 분류 (새 영상만, 앱을 열 때 확인)
 format_outcome = {"action": "none", "error": None}
@@ -113,15 +113,15 @@ if pending_formats and config.AUTO_COLLECT:
         elif format_outcome["action"] == "no_key":
             fbox.update(label="OpenAI 키가 없어 포맷 분류를 건너뜀", state="error")
         elif format_outcome["action"] != "none":
-            fbox.update(label="포맷 분류를 하지 못했습니다", state="error")
+            fbox.update(label="포맷 분류를 하지 못함", state="error")
 if format_outcome["action"] in ("failed", "retry_wait"):
     fmsg = classify_formats.explain_error(format_outcome["error"])
     if format_outcome["action"] == "retry_wait":
-        fmsg += f" — {_fmt_run(format_outcome['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도합니다."
+        fmsg += f" — {_fmt_run(format_outcome['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도함."
     st.error(f"포맷 분류 실패: {fmsg}")
 elif format_outcome["action"] == "no_key":
-    st.warning(f"OpenAI 키가 없어 포맷 분류를 하지 않았습니다 (미분류 {pending_formats}개). 배포 환경은 Streamlit "
-               f'Secrets에 `{keys.OPENAI_KEY_NAME} = "..."`를, 로컬은 .env에 `{keys.OPENAI_KEY_NAME}=...`를 넣어 주세요.')
+    st.warning(f"OpenAI 키가 없어 포맷 분류를 하지 않음 (미분류 {pending_formats}개). 배포 환경은 Streamlit "
+               f'Secrets에 `{keys.OPENAI_KEY_NAME} = "..."`를, 로컬은 .env에 `{keys.OPENAI_KEY_NAME}=...`를 넣어야 함.')
 
 # ---------------------------------------------------------------- 댓글 수집 + 반응 분류 (새 영상·새 댓글만)
 n_comment_videos, n_pending_comments = auto_collect.pending_reaction_work(config.DB_PATH)
@@ -133,7 +133,7 @@ if (n_comment_videos or n_pending_comments) and config.AUTO_COLLECT:
         reaction_outcome = auto_collect.ensure_reactions(collector_state(), config.DB_PATH, progress=rbox.write)
         acts = {reaction_outcome["comments"]["action"], reaction_outcome["reactions"]["action"]}
         bad = acts & {"failed", "retry_wait", "no_key"}
-        rbox.update(label="댓글 반응 분석 완료" if not bad else "댓글 반응 분석 일부를 하지 못했습니다",
+        rbox.update(label="댓글 반응 분석 완료" if not bad else "댓글 반응 분석 일부를 하지 못함",
                     state="complete" if not bad else "error")
 for stage, label, explain, key_name in (
         ("comments", "댓글 수집", collect.explain_error, keys.KEY_NAME),
@@ -142,14 +142,14 @@ for stage, label, explain, key_name in (
     if o["action"] in ("failed", "retry_wait"):
         msg = explain(o.get("error"))
         if o["action"] == "retry_wait":
-            msg += f" — {_fmt_run(o['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도합니다."
+            msg += f" — {_fmt_run(o['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도함."
         st.error(f"{label} 실패: {msg}")
     elif o["action"] == "no_key":
-        st.warning(f"{key_name}가 없어 {label}을 하지 않았습니다.")
+        st.warning(f"{key_name}가 없어 {label}을 하지 않음.")
 
 df_all, basis = load_data(config.DB_PATH.stat().st_mtime)
 if df_all.empty:
-    st.warning(f"표시할 데이터가 없습니다 (수집 기준 {config.CRITERIA}의 성공한 수집 없음).")
+    st.warning(f"표시할 데이터가 없음 (수집 기준 {config.CRITERIA}의 성공한 수집 없음).")
     st.stop()
 
 st.caption(f"수집 기준 `{config.CRITERIA}` · 마지막 수집 {_fmt_run(basis.get('used_search_run'))} · "
@@ -168,7 +168,7 @@ start, end = (period if isinstance(period, (list, tuple)) and len(period) == 2 e
 upload_date = df_all["published_at"].dt.date
 df = df_all[df_all["keyword"].isin(selected) & (upload_date >= start) & (upload_date <= end)]
 if df.empty:
-    st.info("선택한 조건에 해당하는 영상이 없습니다.")
+    st.info("선택한 조건에 해당하는 영상이 없음.")
     st.stop()
 
 videos = metrics.dedupe_videos(df)
@@ -252,8 +252,8 @@ st.dataframe(
 )
 o_share, o_n, o_total = other
 if o_total and o_share > config.FORMAT_OTHER_REVIEW_SHARE:
-    st.warning(f"기타 비율 {o_share:.1%} ({o_n}/{o_total})가 기준 {config.FORMAT_OTHER_REVIEW_SHARE:.0%}를 넘었습니다 — "
-               "포맷 목록 재검토 대상입니다 (CLAUDE.md 기준).")
+    st.warning(f"기타 비율 {o_share:.1%} ({o_n}/{o_total})가 기준 {config.FORMAT_OTHER_REVIEW_SHARE:.0%}를 넘음 — "
+               "포맷 목록 재검토 대상 (CLAUDE.md 기준).")
 st.markdown("**키워드 × 포맷 (영상 수)**")
 st.dataframe(metrics.keyword_format_table(df), width="stretch")
 st.caption(f"포맷은 제목·설명·해시태그 기반 LLM 분류 ({config.FORMAT_MODEL}, 프롬프트 {config.FORMAT_PROMPT_VERSION}) · "
@@ -267,7 +267,7 @@ section("반응은 좋았나?", lambda: obs.reactions(kw_react))
 
 def _reaction_table(summary: pd.DataFrame, group_label: str) -> None:
     if summary.empty:
-        st.info("분석한 댓글이 없습니다.")
+        st.info("분석한 댓글이 없음.")
         return
     t = pd.DataFrame({group_label: summary["group"], "영상 수": summary["video_count"],
                       "분석 영상 수": summary["videos_analyzed"], "분석 댓글 수": summary["comments_analyzed"]})
@@ -310,7 +310,7 @@ cf1, cf2, cf3 = st.columns([2, 2, 1])
 sub_lo, sub_hi = cf1.select_slider("구독자 수 범위", options=SUB_STEPS, value=SUB_DEFAULT,
                                    format_func=SUB_LABELS.get)
 cf2.caption("기본 최솟값 1,000명: 구독자가 아주 적은 채널은 구독자 대비 조회수가 비정상적으로 커져 "
-            "발굴 대상으로 의미가 없어 기본 제외합니다.")
+            "발굴 대상으로 의미가 없어 기본 제외함.")
 multi_only = cf3.checkbox("영상 2개 이상만 보기", value=False)
 
 subs = channels_all["subscriber_count"]
@@ -397,7 +397,7 @@ st.dataframe(
         "링크": st.column_config.LinkColumn(display_text="YouTube에서 열기"),
     },
 )
-st.caption("빈 칸은 계산 제외(값 없음)이며 정렬 시 맨 아래로 갑니다.")
+st.caption("빈 칸은 계산에서 제외된 값이며 정렬 시 맨 아래로 감")
 
 # ---------------------------------------------------------------- 5. 세부 분포
 section("세부 분포", lambda: obs.distribution(df))

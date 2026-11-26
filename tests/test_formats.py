@@ -73,7 +73,7 @@ def test_auth_error_stops_and_masks(db_path):  # noqa: F811
     r = _classify(db_path, clf)
     assert r["stopped"] and r["classified"] == 0 and len(clf.calls) == 1      # 첫 실패에서 중단
     assert "ab12" not in r["errors"][0] and "***" in r["errors"][0]
-    assert "OpenAI API 키가 올바르지 않습니다" in cf.explain_error(r["errors"][0])
+    assert "OpenAI API 키가 올바르지 않음" in cf.explain_error(r["errors"][0])
 
 
 def test_format_summary_tables_and_other_share(db_path):  # noqa: F811

@@ -85,7 +85,7 @@ def test_no_key(tmp_path):
 
 def test_explain_error():
     assert "할당량" in collect.explain_error("HTTP 403 quotaExceeded: x")
-    assert "API 키가 올바르지 않습니다" in collect.explain_error("HTTP 400 keyInvalid: API key not valid")
+    assert "API 키가 올바르지 않음" in collect.explain_error("HTTP 400 keyInvalid: API key not valid")
     assert collect.explain_error(None) == ""
 
 

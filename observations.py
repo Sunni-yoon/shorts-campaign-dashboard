@@ -45,7 +45,7 @@ def baseline(df: pd.DataFrame) -> str:
 def topics(summary: pd.DataFrame, total_label: str = "전체") -> str:
     s = summary[summary["keyword"] != total_label]
     if s.empty:
-        return "선택한 키워드가 없습니다."
+        return "선택한 키워드가 없음."
     if len(s) == 1:
         r = s.iloc[0]
         return (f"{r['keyword']} 1개 키워드: 조회수 중앙값 {fmt('views', r['views_median'])} · "
@@ -69,7 +69,7 @@ def topics(summary: pd.DataFrame, total_label: str = "전체") -> str:
 
 def creators(channels: pd.DataFrame) -> str:
     if channels.empty:
-        return "조건에 맞는 채널이 없습니다."
+        return "조건에 맞는 채널이 없음."
     multi = int((channels["video_count"] >= 2).sum())
     over1 = int((channels["views_per_subscriber_median"] > 1).sum())
     text = (f"채널 {len(channels)}개 (영상 2개 이상 {multi}개) · "
@@ -86,10 +86,10 @@ def creators(channels: pd.DataFrame) -> str:
 
 def references(top: pd.DataFrame, sort_key: str) -> str:
     if top.empty:
-        return "조건에 맞는 영상이 없습니다."
+        return "조건에 맞는 영상이 없음."
     valid = top.dropna(subset=[sort_key])
     if valid.empty:
-        return f"{LABELS[sort_key]}를 계산할 수 있는 영상이 없습니다."
+        return f"{LABELS[sort_key]}를 계산할 수 있는 영상이 없음."
     r = valid.iloc[0]
     counts = top["keywords"].str.split(", ").explode().value_counts()
     by_kw = ", ".join(f"{kw} {n}개" for kw, n in counts.items())
@@ -100,7 +100,7 @@ def references(top: pd.DataFrame, sort_key: str) -> str:
 def distribution(df: pd.DataFrame) -> str:
     er = df.dropna(subset=["engagement_rate"])
     if er.empty:
-        return "참여율을 계산할 수 있는 영상이 없습니다."
+        return "참여율을 계산할 수 있는 영상이 없음."
     v = metrics.dedupe_videos(er)
     text = (f"참여율 범위 {fmt('engagement_rate', v['engagement_rate'].min())} ~ "
             f"{fmt('engagement_rate', v['engagement_rate'].max())} · "
@@ -118,7 +118,7 @@ def formats(fsum: pd.DataFrame, other: tuple) -> str:
     classified = fsum[fsum["format"] != metrics.UNCLASSIFIED]
     total = int(classified["video_count"].sum())
     if total == 0:
-        return "분류된 영상이 없습니다."
+        return "분류된 영상이 없음."
     top = classified.loc[classified["video_count"].idxmax()]
     share, n_other, n_cls = other
     parts = [f"분류 {total}개 중 가장 많은 포맷 {top['format']} {top['video_count']}개({top['share']:.0%})",
@@ -139,10 +139,10 @@ def formats(fsum: pd.DataFrame, other: tuple) -> str:
 def reactions(kw_summary: pd.DataFrame, total_label: str = "전체") -> str:
     """반응 섹션 관찰: 분석 규모, 전체 중앙값, 긍정 비율 중앙값 최고·최저 키워드."""
     if kw_summary.empty:
-        return "분석한 댓글이 없습니다."
+        return "분석한 댓글이 없음."
     total = kw_summary[kw_summary["group"] == total_label]
     if total.empty or total.iloc[0]["videos_analyzed"] == 0:
-        return "분석 댓글이 충분한 영상이 없습니다."
+        return "분석 댓글이 충분한 영상이 없음."
     t = total.iloc[0]
     parts = [f"영상 {t['videos_analyzed']}개(댓글 {t['comments_analyzed']:,}개) 분석",
              f"영상별 긍정 비율 중앙값 {t['positive_rate_median']:.1%} · 부정 {t['negative_rate_median']:.1%} · "

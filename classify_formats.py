@@ -128,17 +128,17 @@ def explain_error(error: str | None) -> str:
     if not error:
         return ""
     if "insufficient_quota" in error:
-        hint = "OpenAI 계정의 크레딧(결제 한도)이 부족합니다."
+        hint = "OpenAI 계정의 크레딧(결제 한도)이 부족함."
     elif "AuthenticationError" in error or "invalid_api_key" in error or "Incorrect API key" in error:
-        hint = "OpenAI API 키가 올바르지 않습니다. Secrets(배포) 또는 .env(로컬)의 OPENAI_API_KEY를 확인하세요."
+        hint = "OpenAI API 키가 올바르지 않음. Secrets(배포) 또는 .env(로컬)의 OPENAI_API_KEY 확인 필요."
     elif "RateLimitError" in error:
-        hint = "OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도됩니다."
+        hint = "OpenAI 요청 한도에 걸림. 잠시 후 다시 시도함."
     elif "NotFoundError" in error or "model_not_found" in error:
-        hint = f"모델 {config.FORMAT_MODEL}을 사용할 수 없습니다. config.FORMAT_MODEL을 확인하세요."
+        hint = f"모델 {config.FORMAT_MODEL}을 사용할 수 없음. config.FORMAT_MODEL 확인 필요."
     elif "APIConnectionError" in error or "Timeout" in error:
-        hint = "OpenAI 서버에 연결하지 못했습니다(네트워크 오류)."
+        hint = "OpenAI 서버에 연결하지 못함(네트워크 오류)."
     else:
-        hint = "LLM 분류 중 오류가 발생했습니다."
+        hint = "LLM 분류 중 오류 발생."
     return f"{hint} (원문: {error})"
 
 
