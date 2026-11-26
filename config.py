@@ -23,6 +23,8 @@ PUBLISHED_MAX_DAYS_AGO = 30
 
 # 지표 계산: 업로드 후 경과 일수 하한
 MIN_ELAPSED_DAYS = 1
+# 구독자 대비 조회수는 이 구독자 수 이상 채널의 영상만 계산 (작은 채널은 분모가 작아 값이 극단적으로 커짐)
+VPS_MIN_SUBSCRIBERS = 1000
 
 # 수집 한도
 MAX_SHORTS_PER_KEYWORD = 50   # 키워드당 쇼츠 최대 개수

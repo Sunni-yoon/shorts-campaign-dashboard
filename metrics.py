@@ -35,7 +35,7 @@ SHORT_DESCRIPTIONS = {
     "views": "조회수의 가운데 값",
     "views_per_day": "조회수 ÷ 경과 일수",
     "engagement_rate": "(좋아요+댓글) ÷ 조회수",
-    "views_per_subscriber": "조회수 ÷ 구독자 수",
+    "views_per_subscriber": f"조회수 ÷ 구독자 수 ({config.VPS_MIN_SUBSCRIBERS:,}명 이상 채널)",
 }
 
 # 지표 설명 — 긴 버전: 요약표 열 툴팁·데이터 기준 안내·리포트용
@@ -44,7 +44,9 @@ DESCRIPTIONS = {
     "views": "영상들을 조회수 순으로 세웠을 때 가운데 값",
     "views_per_day": "조회수 ÷ 업로드 후 경과 일수, 업로드 후 지금까지의 하루 평균 조회수",
     "engagement_rate": "(좋아요 + 댓글) ÷ 조회수, 좋아요·댓글 숨김 영상 제외",
-    "views_per_subscriber": "조회수 ÷ 채널 구독자 수, 1보다 크면 구독자보다 많이 봤다는 뜻",
+    "views_per_subscriber": (f"조회수 ÷ 채널 구독자 수, 1보다 크면 구독자보다 많이 봤다는 뜻. "
+                             f"구독자 {config.VPS_MIN_SUBSCRIBERS:,}명 이상 채널의 영상만 계산. "
+                             "구독자가 매우 적은 채널은 분모가 작아 값이 극단적으로 커짐"),
     # 포맷·댓글 분석
     "format": (f"제목·설명·해시태그로 LLM이 분류 ({' / '.join(config.FORMATS)}), 겹치면 이 순서로 우선"),
     "positive_rate": "영상별 분석 댓글 중 긍정으로 분류된 댓글 비율",
@@ -66,6 +68,7 @@ REASONS = {
     "subscribers_hidden": "구독자 비공개",
     "no_subscribers": "구독자 정보 없음",
     "zero_subscribers": "구독자 0",
+    "small_channel": f"구독자 {config.VPS_MIN_SUBSCRIBERS:,}명 미만 채널",
 }
 
 # 지표 키 → 제외 사유 컬럼
@@ -187,9 +190,9 @@ def compute_metrics(df: pd.DataFrame, min_elapsed_days: float = config.MIN_ELAPS
 
     # 구독자 대비 조회수
     vps_reason = np.select(
-        [hidden, subs.isna(), subs == 0, views.isna()],
+        [hidden, subs.isna(), subs == 0, subs < config.VPS_MIN_SUBSCRIBERS, views.isna()],
         [REASONS["subscribers_hidden"], REASONS["no_subscribers"], REASONS["zero_subscribers"],
-         REASONS["no_views"]],
+         REASONS["small_channel"], REASONS["no_views"]],
         default=None,
     )
     df["views_per_subscriber"] = np.where(pd.isna(vps_reason), views / subs.where(subs > 0), np.nan)

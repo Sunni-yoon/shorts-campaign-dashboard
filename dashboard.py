@@ -309,8 +309,8 @@ obs_slot = st.empty()   # 필터 적용 후의 관찰 문장을 제목 바로 �
 cf1, cf2, cf3 = st.columns([2, 2, 1])
 sub_lo, sub_hi = cf1.select_slider("구독자 수 범위", options=SUB_STEPS, value=SUB_DEFAULT,
                                    format_func=SUB_LABELS.get)
-cf2.caption("기본 최솟값 1,000명: 구독자가 아주 적은 채널은 구독자 대비 조회수가 비정상적으로 커져 "
-            "발굴 대상으로 의미가 없어 기본 제외함.")
+cf2.caption(f"기본 최솟값 1,000명: 구독자가 아주 적은 채널은 발굴 대상으로 의미가 없어 기본 제외함. "
+            f"구독자 {config.VPS_MIN_SUBSCRIBERS:,}명 미만 채널은 구독자 대비 조회수를 계산하지 않음(빈 칸).")
 multi_only = cf3.checkbox("영상 2개 이상만 보기", value=False)
 
 subs = channels_all["subscriber_count"]

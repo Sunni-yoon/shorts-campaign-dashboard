@@ -105,7 +105,9 @@ def test_latest_snapshot_and_nearest_subscriber(db_path):
     d = _row(metrics.load(db_path, V2), "D")
     assert d.views == 300                      # 최신 스냅샷(R2)
     assert d.subscriber_count == 999           # 같은 run 없음 → 가장 가까운 시점
-    assert d.views_per_subscriber == pytest.approx(300 / 999)
+    assert math.isnan(d.views_per_subscriber)  # 구독자 999명 < 1,000 → 이 지표에서만 제외
+    assert d.views_per_subscriber_excluded_reason == metrics.REASONS["small_channel"]
+    assert d.engagement_rate == pytest.approx(6 / 300)       # 다른 지표에는 그대로 포함
 
 
 def test_same_run_subscriber_preferred(db_path):
@@ -123,7 +125,7 @@ def test_summary_and_exclusions_dedupe(db_path):
     ex = metrics.exclusion_summary(df)
     total = ex[(ex.metric == "참여율") & (ex.reason == "합계")]["count"].item()
     assert total == 1
-    assert metrics.excluded_count(df, "views_per_subscriber") == 1
+    assert metrics.excluded_count(df, "views_per_subscriber") == 2   # C 비공개 + D 1,000명 미만
     assert metrics.exclusion_text(df, "engagement_rate") == "계산 제외 1개 — 좋아요 숨김 1개"
     assert metrics.exclusion_text(df, "views") == "제외 없음"
 
@@ -137,14 +139,29 @@ def test_data_basis(db_path):
 
 def test_summary_by_channel(db_path):
     ch = metrics.summary_by_channel(metrics.load(db_path, V2))
-    assert list(ch.channel_id) == ["c1", "c3", "c2"]          # 중앙값 높은 순, 비공개(NaN)는 맨 아래
+    assert list(ch.channel_id) == ["c1", "c2", "c3"]          # 중앙값 높은 순, 값 없음(비공개·1,000명 미만)은 아래
     c1 = ch.iloc[0]
     assert c1.video_count == 3 and not c1.single_video        # E는 두 키워드에 있어도 1개로 셈
     assert c1.views_per_subscriber_median == pytest.approx(1.0)   # A 1.0, B 0.5, E 2.0
     assert c1.rep_video_id == "E"                               # 구독자 대비 조회수 최고
     assert c1.engagement_rate_n == 2                            # A는 좋아요 숨김으로 제외
-    c3 = ch.iloc[1]
+    c3 = ch.set_index("channel_id").loc["c3"]
     assert c3.single_video and c3.subscriber_count == 999
-    c2 = ch.iloc[2]
+    assert math.isnan(c3.views_per_subscriber_median)            # 1,000명 미만 → 빈 칸
+    c2 = ch.iloc[1]
     assert c2.subscriber_hidden and math.isnan(c2.views_per_subscriber_median)
     assert c2.rep_video_id == "C"                               # 계산 불가 → 조회수 최고 영상
+
+
+def test_vps_min_subscribers_boundary():
+    import pandas as pd
+    base = dict(keyword="k", title="t", channel_title="ch", snapshot_run_id="r",
+                published_at=pd.Timestamp("2026-11-01", tz="UTC"), collected_at=pd.Timestamp("2026-11-11", tz="UTC"),
+                view_count=5000, like_count=10, comment_count=1, subscriber_hidden=0, channel_id="c")
+    df = pd.DataFrame([{**base, "video_id": "a", "subscriber_count": 999},
+                       {**base, "video_id": "b", "subscriber_count": 1000}])
+    out = metrics.compute_metrics(df).set_index("video_id")
+    assert math.isnan(out.loc["a", "views_per_subscriber"])
+    assert out.loc["a", "views_per_subscriber_excluded_reason"] == "구독자 1,000명 미만 채널"
+    assert out.loc["b", "views_per_subscriber"] == pytest.approx(5.0)
+    assert out.loc["a", "engagement_rate"] == pytest.approx(11 / 5000)   # 다른 지표는 그대로
