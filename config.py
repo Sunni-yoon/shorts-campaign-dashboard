@@ -44,6 +44,9 @@ UNIT_COST = {"search": 100, "videos": 1, "channels": 1, "comments": 1}
 # DB 위치 (SHORTS_DB_PATH 환경변수로 바꿀 수 있음: 테스트·배포용)
 DB_PATH = Path(os.environ.get("SHORTS_DB_PATH") or Path(__file__).parent / "data" / "shorts.db")
 
+# 대시보드: 섹션 제목 아래 "관찰 · ..." 한 줄 표시 여부 (문장 생성은 observations.py에 그대로 있음)
+SHOW_OBSERVATIONS = False
+
 # 자동 수집 (대시보드를 열 때 확인)
 AUTO_COLLECT = os.environ.get("AUTO_COLLECT", "1") != "0"   # AUTO_COLLECT=0 이면 끔
 REFRESH_HOURS = 24            # 마지막 성공 수집 후 이 시간이 지나면 새로 검색

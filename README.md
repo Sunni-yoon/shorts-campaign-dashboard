@@ -14,7 +14,7 @@
 4. **무엇을 참고해 만들까?** 지표별 상위 영상과 YouTube 링크
 5. **세부 분포** 키워드별 참여율 분포, 조회수 vs 참여율
 
-각 섹션 제목 아래에는 현재 필터 기준으로 숫자로 확인되는 관찰 한 줄이 자동으로 생성됩니다.
+섹션별 관찰 문장(숫자로 확인되는 사실 한 줄)은 `observations.py`에서 생성합니다. 대시보드 화면에서는 현재 꺼 두었고, `config.py`의 `SHOW_OBSERVATIONS = True`로 다시 켤 수 있습니다.
 
 분석 키워드: `buldak challenge`, `spicy noodle challenge`, `shin ramyun`, `korean ramen recipe` (미국 지역, 영어 기준)
 
@@ -229,7 +229,7 @@ venv\Scripts\python.exe -m pytest tests                 # 테스트
 ```
 ├── dashboard.py        # Streamlit 대시보드 (화면만, 계산은 metrics.py)
 ├── metrics.py          # 지표 계산·요약·제외 집계 (대시보드·리포트 공용)
-├── observations.py     # 섹션별 관찰 문장 생성 (숫자 사실만)
+├── observations.py     # 섹션별 관찰 문장 생성 (숫자 사실만, 화면 표시는 SHOW_OBSERVATIONS로 제어)
 ├── auto_collect.py     # 앱을 열 때 24시간 경과 확인 → 수집, 동시 접속 잠금, 실패 후 재시도 대기
 ├── collect.py          # YouTube API 수집 (search / refresh / reclassify / purge)
 ├── classify_formats.py # 콘텐츠 포맷 LLM 분류 (OpenAI, 미분류 영상만)

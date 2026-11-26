@@ -45,6 +45,14 @@ DESCRIPTIONS = {
     "views_per_day": "조회수 ÷ 업로드 후 경과 일수, 업로드 후 지금까지의 하루 평균 조회수",
     "engagement_rate": "(좋아요 + 댓글) ÷ 조회수, 좋아요·댓글 숨김 영상 제외",
     "views_per_subscriber": "조회수 ÷ 채널 구독자 수, 1보다 크면 구독자보다 많이 봤다는 뜻",
+    # 포맷·댓글 분석
+    "format": (f"제목·설명·해시태그로 LLM이 분류 ({' / '.join(config.FORMATS)}), 겹치면 이 순서로 우선"),
+    "positive_rate": "영상별 분석 댓글 중 긍정으로 분류된 댓글 비율",
+    "negative_rate": "영상별 분석 댓글 중 부정으로 분류된 댓글 비율 (제품·출연자·연출 등 대상은 구분하지 않음)",
+    "purchase_rate": ('영상별 분석 댓글 중 "어디서 사요?", "먹어 보고 싶다"처럼 사거나 먹어 보고 싶다는 '
+                      "표현이 있는 댓글 비율"),
+    "comment_basis": (f"영상별 관련도 상위 댓글 최대 {config.COMMENTS_PER_VIDEO}개, "
+                      f"분석 댓글이 {config.COMMENT_MIN_PER_VIDEO}개 미만인 영상은 제외"),
 }
 
 # 제외 사유 이름 (한 곳에서 관리)

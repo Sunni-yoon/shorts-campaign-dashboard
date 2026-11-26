@@ -45,10 +45,15 @@ def load_data(db_mtime: float) -> tuple[pd.DataFrame, dict]:
     return df, metrics.data_basis(config.DB_PATH, config.CRITERIA, df)
 
 
-def section(title: str, observation: str) -> None:
-    """섹션 제목(결정 질문) + 숫자로 확인되는 핵심 관찰 한 줄."""
+def section(title: str, observation=None) -> None:
+    """섹션 제목(결정 질문). 관찰 한 줄은 config.SHOW_OBSERVATIONS가 True일 때만 표시 (observation은 지연 계산 함수)."""
     st.subheader(title)
-    st.markdown(f"**관찰** · {observation}")
+    show_observation(st, observation)
+
+
+def show_observation(slot, observation) -> None:
+    if config.SHOW_OBSERVATIONS and observation is not None:
+        slot.markdown(f"**관찰** · {observation()}")
 
 
 @st.cache_resource
@@ -171,7 +176,7 @@ desc = metrics.DESCRIPTIONS              # 긴 버전: 요약표 툴팁·데이�
 short = metrics.SHORT_DESCRIPTIONS       # 짧은 버전: 상단 카드
 
 # ---------------------------------------------------------------- 1. 기준선
-section("우리 캠페인 기준선은?", obs.baseline(df))
+section("우리 캠페인 기준선은?", lambda: obs.baseline(df))
 
 
 def _fmt_median(key: str, fmt: str) -> str:
@@ -194,7 +199,7 @@ for col, (label, value, text, key) in zip(st.columns(len(cards)), cards):
 
 # ---------------------------------------------------------------- 2. 주제
 summary = metrics.summary_by_keyword(df)
-section("어떤 주제가 잘 퍼지나?", obs.topics(summary))
+section("어떤 주제가 잘 퍼지나?", lambda: obs.topics(summary))
 
 table = pd.DataFrame({"키워드": summary["keyword"], "영상 수": summary["video_count"]})
 for key, label in COLUMN_LABELS.items():
@@ -223,7 +228,7 @@ st.caption(
 # ---------------------------------------------------------------- 2-1. 포맷
 fsum = metrics.summary_by_format(df)
 other = metrics.other_share(df)
-section("어떤 포맷이 잘 퍼지나?", obs.formats(fsum, other))
+section("어떤 포맷이 잘 퍼지나?", lambda: obs.formats(fsum, other))
 
 ftable = pd.DataFrame({
     "포맷": fsum["format"],
@@ -257,7 +262,7 @@ st.caption(f"포맷은 제목·설명·해시태그 기반 LLM 분류 ({config.F
 # ---------------------------------------------------------------- 2-2. 댓글 반응 (집계만, 원문 표시 안 함)
 kw_react = metrics.summary_reactions(df, by="keyword")
 fmt_react = metrics.summary_reactions(df, by="format")
-section("반응은 좋았나?", obs.reactions(kw_react))
+section("반응은 좋았나?", lambda: obs.reactions(kw_react))
 
 
 def _reaction_table(summary: pd.DataFrame, group_label: str) -> None:
@@ -274,7 +279,7 @@ def _reaction_table(summary: pd.DataFrame, group_label: str) -> None:
         for stat, name in (("median", "중앙값"), ("mean", "평균")):
             t[f"{label} {name}"] = summary[f"{col}_{stat}"]
             cfg[f"{label} {name}"] = st.column_config.NumberColumn(
-                format="percent", help=f"영상별 {label}(해당 댓글 수 ÷ 분석 댓글 수)의 {name}")
+                format="percent", help=f"{desc[col]} — 영상별 값의 {name}")
     t[f"제외: 댓글 {config.COMMENT_MIN_PER_VIDEO}개 미만"] = summary["excluded_too_few"]
     t["제외: 댓글 없음·사용 중지"] = summary["excluded_no_comments"]
     st.dataframe(t, hide_index=True, width="stretch", column_config=cfg)
@@ -317,7 +322,7 @@ else:
 channels = channels_all[in_range]
 if multi_only:
     channels = channels[channels["video_count"] >= 2]
-obs_slot.markdown(f"**관찰** · {obs.creators(channels)}")
+show_observation(obs_slot, lambda: obs.creators(channels))
 
 ch_table = pd.DataFrame({
     "채널명": channels["channel_title"],
@@ -364,7 +369,7 @@ s1, s2 = st.columns([2, 1])
 sort_key = s1.selectbox("정렬 기준", list(COLUMN_LABELS), format_func=COLUMN_LABELS.get)
 top_n = s2.slider("표시 개수", 5, max(5, len(videos)), min(20, len(videos)))
 top = videos.sort_values(sort_key, ascending=False, na_position="last").head(top_n)
-ref_slot.markdown(f"**관찰** · {obs.references(top, sort_key)}")
+show_observation(ref_slot, lambda: obs.references(top, sort_key))
 top_table = pd.DataFrame({
     "제목": top["title"],
     "채널": top["channel_title"],
@@ -395,7 +400,7 @@ st.dataframe(
 st.caption("빈 칸은 계산 제외(값 없음)이며 정렬 시 맨 아래로 갑니다.")
 
 # ---------------------------------------------------------------- 5. 세부 분포
-section("세부 분포", obs.distribution(df))
+section("세부 분포", lambda: obs.distribution(df))
 er = df.dropna(subset=["engagement_rate"])
 c1, c2 = st.columns(2)
 
@@ -468,6 +473,11 @@ b1.markdown(
 - 참여율: {desc['engagement_rate']} (공유 수는 API 미제공으로 제외)
 - 구독자 대비 조회수: {desc['views_per_subscriber']} (같은 수집 시점, 없으면 가장 가까운 시점의 구독자 수)
 - 요약 통계는 평균(영상별 값의 단순 평균)과 중앙값을 함께 제시
+- 포맷: {desc['format']}
+- 긍정 비율: {desc['positive_rate']}
+- 부정 비율: {desc['negative_rate']}
+- 구매의향 비율: {desc['purchase_rate']}
+- 댓글 분석 기준: {desc['comment_basis']}
 """
 )
 ex = metrics.exclusion_summary(df).rename(columns={"metric": "지표", "reason": "사유", "count": "영상 수"})
