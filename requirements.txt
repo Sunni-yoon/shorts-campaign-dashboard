@@ -1,0 +1,6 @@
+google-api-python-client==2.202.0
+python-dotenv==1.2.4
+pandas==2.3.3
+plotly==7.2.0
+streamlit==1.65.0
+pytest==9.2.0

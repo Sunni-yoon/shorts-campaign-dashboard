@@ -1,0 +1,113 @@
+"""섹션별 핵심 관찰 한 줄 생성 (대시보드·리포트 공용).
+
+metrics.py가 계산한 결과만 받아 숫자로 확인되는 사실을 문장으로 만든다.
+해석("좋다", "유망") 이나 추천은 넣지 않는다.
+"""
+import pandas as pd
+
+import metrics
+
+LABELS = {
+    "views": "조회수",
+    "views_per_day": "조회수 속도",
+    "engagement_rate": "참여율",
+    "views_per_subscriber": "구독자 대비 조회수",
+}
+
+
+def fmt(key: str, value) -> str:
+    """지표별 표기: 조회수 1,234 / 조회수 속도 1,234회/일 / 참여율 1.23% / 구독자 대비 1.23."""
+    if value is None or pd.isna(value):
+        return "-"
+    if key == "engagement_rate":
+        return f"{value:.2%}"
+    if key == "views_per_subscriber":
+        return f"{value:.2f}"
+    if key == "views_per_day":
+        return f"{value:,.0f}회/일"
+    return f"{value:,.0f}"
+
+
+def _short(text: str, n: int = 40) -> str:
+    text = str(text or "")
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def baseline(df: pd.DataFrame) -> str:
+    v = metrics.dedupe_videos(df)
+    n_er = int(v["engagement_rate"].notna().sum())
+    return (f"쇼츠 {len(v)}개 · 조회수 중앙값 {fmt('views', v['views'].median())} · "
+            f"조회수 속도 중앙값 {fmt('views_per_day', v['views_per_day'].median())} · "
+            f"참여율 중앙값 {fmt('engagement_rate', v['engagement_rate'].median())} (계산 가능 {n_er}개) · "
+            f"구독자 대비 조회수 중앙값 {fmt('views_per_subscriber', v['views_per_subscriber'].median())}")
+
+
+def topics(summary: pd.DataFrame, total_label: str = "전체") -> str:
+    s = summary[summary["keyword"] != total_label]
+    if s.empty:
+        return "선택한 키워드가 없습니다."
+    if len(s) == 1:
+        r = s.iloc[0]
+        return (f"{r['keyword']} 1개 키워드: 조회수 중앙값 {fmt('views', r['views_median'])} · "
+                f"참여율 중앙값 {fmt('engagement_rate', r['engagement_rate_median'])} · "
+                f"구독자 대비 조회수 중앙값 {fmt('views_per_subscriber', r['views_per_subscriber_median'])}")
+    parts = []
+    vps = s.dropna(subset=["views_per_subscriber_median"])
+    if not vps.empty:
+        hi = vps.loc[vps["views_per_subscriber_median"].idxmax()]
+        lo = vps.loc[vps["views_per_subscriber_median"].idxmin()]
+        parts.append(f"구독자 대비 조회수 중앙값 최고 {hi['keyword']} "
+                     f"{fmt('views_per_subscriber', hi['views_per_subscriber_median'])}, "
+                     f"최저 {lo['keyword']} {fmt('views_per_subscriber', lo['views_per_subscriber_median'])}")
+    for key in ("views", "engagement_rate"):
+        col = s.dropna(subset=[f"{key}_median"])
+        if not col.empty:
+            hi = col.loc[col[f"{key}_median"].idxmax()]
+            parts.append(f"{LABELS[key]} 중앙값 최고 {hi['keyword']} {fmt(key, hi[f'{key}_median'])}")
+    return " · ".join(parts)
+
+
+def creators(channels: pd.DataFrame) -> str:
+    if channels.empty:
+        return "조건에 맞는 채널이 없습니다."
+    multi = int((channels["video_count"] >= 2).sum())
+    over1 = int((channels["views_per_subscriber_median"] > 1).sum())
+    text = (f"채널 {len(channels)}개 (영상 2개 이상 {multi}개) · "
+            f"구독자 대비 조회수 중앙값이 1을 넘는 채널 {over1}개")
+    top = channels.dropna(subset=["views_per_subscriber_median"])
+    if not top.empty:
+        r = top.iloc[0]
+        subs = "비공개" if pd.isna(r["subscriber_count"]) else f"{r['subscriber_count']:,.0f}명"
+        text += (f" · 1위 {_short(r['channel_title'], 30)} "
+                 f"{fmt('views_per_subscriber', r['views_per_subscriber_median'])} "
+                 f"(구독자 {subs}, 영상 {r['video_count']}개)")
+    return text
+
+
+def references(top: pd.DataFrame, sort_key: str) -> str:
+    if top.empty:
+        return "조건에 맞는 영상이 없습니다."
+    valid = top.dropna(subset=[sort_key])
+    if valid.empty:
+        return f"{LABELS[sort_key]}를 계산할 수 있는 영상이 없습니다."
+    r = valid.iloc[0]
+    counts = top["keywords"].str.split(", ").explode().value_counts()
+    by_kw = ", ".join(f"{kw} {n}개" for kw, n in counts.items())
+    return (f"{LABELS[sort_key]} 1위: {_short(r['title'])} ({fmt(sort_key, r[sort_key])}) · "
+            f"표시된 {len(top)}개의 키워드 분포: {by_kw}")
+
+
+def distribution(df: pd.DataFrame) -> str:
+    er = df.dropna(subset=["engagement_rate"])
+    if er.empty:
+        return "참여율을 계산할 수 있는 영상이 없습니다."
+    v = metrics.dedupe_videos(er)
+    text = (f"참여율 범위 {fmt('engagement_rate', v['engagement_rate'].min())} ~ "
+            f"{fmt('engagement_rate', v['engagement_rate'].max())} · "
+            f"조회수 범위 {fmt('views', v['views'].min())} ~ {fmt('views', v['views'].max())}")
+    med = er.groupby("keyword")["engagement_rate"].median()
+    if len(med) >= 2:
+        text += (f" · 키워드별 참여율 중앙값 차이 최대 {(med.max() - med.min()) * 100:.2f}%p "
+                 f"({med.idxmax()} {fmt('engagement_rate', med.max())} vs "
+                 f"{med.idxmin()} {fmt('engagement_rate', med.min())})")
+    return text
