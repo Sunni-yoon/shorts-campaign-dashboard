@@ -90,7 +90,11 @@ class OpenAIClassifier:
         cached = getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0
         usage = {"input": u.input_tokens, "cached_input": cached, "output": u.output_tokens,
                  "model": getattr(resp, "model", self.model)}
-        return parse_response(resp.output_text), usage
+        try:
+            return parse_response(resp.output_text), usage
+        except ParseError as e:
+            e.usage = usage                    # 실패한 호출도 과금되므로 비용 집계에 포함
+            raise
 
 
 def cost_usd(usage: dict) -> float:
@@ -134,7 +138,7 @@ def explain_error(error: str | None) -> str:
     elif "APIConnectionError" in error or "Timeout" in error:
         hint = "OpenAI 서버에 연결하지 못했습니다(네트워크 오류)."
     else:
-        hint = "포맷 분류 중 오류가 발생했습니다."
+        hint = "LLM 분류 중 오류가 발생했습니다."
     return f"{hint} (원문: {error})"
 
 
@@ -161,6 +165,8 @@ def classify_pending(conn, api_key: str, classifier=None, progress=None, limit: 
             tags = json.loads(tags_json) if tags_json else []
             parsed, usage = classifier.classify(build_input(title, desc, tags))
         except Exception as e:
+            for k in ("input", "cached_input", "output"):
+                result["usage"][k] += (getattr(e, "usage", None) or {}).get(k, 0) or 0
             msg = keys.mask(f"{type(e).__name__}: {e}", api_key)
             result["failed"] += 1
             if len(result["errors"]) < 5:

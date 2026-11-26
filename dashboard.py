@@ -118,6 +118,30 @@ elif format_outcome["action"] == "no_key":
     st.warning(f"OpenAI 키가 없어 포맷 분류를 하지 않았습니다 (미분류 {pending_formats}개). 배포 환경은 Streamlit "
                f'Secrets에 `{keys.OPENAI_KEY_NAME} = "..."`를, 로컬은 .env에 `{keys.OPENAI_KEY_NAME}=...`를 넣어 주세요.')
 
+# ---------------------------------------------------------------- 댓글 수집 + 반응 분류 (새 영상·새 댓글만)
+n_comment_videos, n_pending_comments = auto_collect.pending_reaction_work(config.DB_PATH)
+reaction_outcome = {"comments": {"action": "none"}, "reactions": {"action": "none"}}
+if (n_comment_videos or n_pending_comments) and config.AUTO_COLLECT:
+    with st.status(f"댓글 반응 분석 중 — 댓글 수집 대상 영상 {n_comment_videos}개, 분류 대상 댓글 "
+                   f"{n_pending_comments}개 (수집 후 새 댓글이 더해짐, 처음에는 몇 분 걸릴 수 있음)",
+                   expanded=False) as rbox:
+        reaction_outcome = auto_collect.ensure_reactions(collector_state(), config.DB_PATH, progress=rbox.write)
+        acts = {reaction_outcome["comments"]["action"], reaction_outcome["reactions"]["action"]}
+        bad = acts & {"failed", "retry_wait", "no_key"}
+        rbox.update(label="댓글 반응 분석 완료" if not bad else "댓글 반응 분석 일부를 하지 못했습니다",
+                    state="complete" if not bad else "error")
+for stage, label, explain, key_name in (
+        ("comments", "댓글 수집", collect.explain_error, keys.KEY_NAME),
+        ("reactions", "댓글 분류", classify_formats.explain_error, keys.OPENAI_KEY_NAME)):
+    o = reaction_outcome[stage]
+    if o["action"] in ("failed", "retry_wait"):
+        msg = explain(o.get("error"))
+        if o["action"] == "retry_wait":
+            msg += f" — {_fmt_run(o['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도합니다."
+        st.error(f"{label} 실패: {msg}")
+    elif o["action"] == "no_key":
+        st.warning(f"{key_name}가 없어 {label}을 하지 않았습니다.")
+
 df_all, basis = load_data(config.DB_PATH.stat().st_mtime)
 if df_all.empty:
     st.warning(f"표시할 데이터가 없습니다 (수집 기준 {config.CRITERIA}의 성공한 수집 없음).")
@@ -229,6 +253,47 @@ st.markdown("**키워드 × 포맷 (영상 수)**")
 st.dataframe(metrics.keyword_format_table(df), width="stretch")
 st.caption(f"포맷은 제목·설명·해시태그 기반 LLM 분류 ({config.FORMAT_MODEL}, 프롬프트 {config.FORMAT_PROMPT_VERSION}) · "
            f"영상 {config.FORMAT_MIN_SAMPLE}개 미만은 표본 부족 · 키워드 × 포맷 표는 여러 키워드에 속한 영상을 키워드마다 셈")
+
+# ---------------------------------------------------------------- 2-2. 댓글 반응 (집계만, 원문 표시 안 함)
+kw_react = metrics.summary_reactions(df, by="keyword")
+fmt_react = metrics.summary_reactions(df, by="format")
+section("반응은 좋았나?", obs.reactions(kw_react))
+
+
+def _reaction_table(summary: pd.DataFrame, group_label: str) -> None:
+    if summary.empty:
+        st.info("분석한 댓글이 없습니다.")
+        return
+    t = pd.DataFrame({group_label: summary["group"], "영상 수": summary["video_count"],
+                      "분석 영상 수": summary["videos_analyzed"], "분석 댓글 수": summary["comments_analyzed"]})
+    cfg = {"영상 수": st.column_config.NumberColumn(format="%d"),
+           "분석 영상 수": st.column_config.NumberColumn(
+               format="%d", help=f"분석 댓글이 {config.COMMENT_MIN_PER_VIDEO}개 이상이라 비율을 계산한 영상 수"),
+           "분석 댓글 수": st.column_config.NumberColumn(format="localized", help="분석 영상들의 분류된 댓글 수 합계")}
+    for col, label in metrics.REACTION_RATES.items():
+        for stat, name in (("median", "중앙값"), ("mean", "평균")):
+            t[f"{label} {name}"] = summary[f"{col}_{stat}"]
+            cfg[f"{label} {name}"] = st.column_config.NumberColumn(
+                format="percent", help=f"영상별 {label}(해당 댓글 수 ÷ 분석 댓글 수)의 {name}")
+    t[f"제외: 댓글 {config.COMMENT_MIN_PER_VIDEO}개 미만"] = summary["excluded_too_few"]
+    t["제외: 댓글 없음·사용 중지"] = summary["excluded_no_comments"]
+    st.dataframe(t, hide_index=True, width="stretch", column_config=cfg)
+
+
+r1, r2 = st.tabs(["키워드별", "포맷별"])
+with r1:
+    _reaction_table(kw_react, "키워드")
+with r2:
+    _reaction_table(fmt_react, "포맷")
+tot = kw_react[kw_react["group"] == "전체"] if not kw_react.empty else kw_react
+if not tot.empty:
+    t0 = tot.iloc[0]
+    st.caption(
+        f"영상별 비율을 먼저 구한 뒤 평균·중앙값을 계산 · 분석 댓글 {config.COMMENT_MIN_PER_VIDEO}개 미만 영상 "
+        f"{t0['excluded_too_few']}개, 댓글 없음·사용 중지 {t0['excluded_no_comments']}개 제외"
+        + (f", 미수집·오류 {t0['excluded_other']}개" if t0["excluded_other"] else "")
+        + f" · 감성·구매의향은 댓글 하나씩 LLM 분류 ({config.COMMENT_MODEL}, 프롬프트 {config.COMMENT_PROMPT_VERSION})"
+        " · 개인정보 보호를 위해 댓글 원문은 표시하지 않음")
 
 # ---------------------------------------------------------------- 3. 크리에이터
 channels_all = metrics.summary_by_channel(df)
@@ -413,6 +478,7 @@ st.subheader("해석 주의")
 st.warning(
     f"""
 - **포맷은 제목·설명 기반 LLM 분류입니다** (영상 내용은 보지 않음). {config.FORMAT_VALIDATION_NOTE}.
+- **댓글 반응:** {config.COMMENT_CAVEAT}.
 - **무작위 표본이 아닙니다.** 키워드 검색의 관련도 상위 영상이라 성과가 좋은 영상 쪽으로 치우쳐 있을 수 있습니다.
 - **공유 수·시청 시간·비용·전환은 포함하지 않습니다.** YouTube Data API가 제공하지 않습니다.
 - **광고 조회수와 자연 조회수를 구분할 수 없습니다.**

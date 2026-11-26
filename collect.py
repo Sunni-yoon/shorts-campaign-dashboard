@@ -97,6 +97,12 @@ class YouTube:
             out.update({it["id"]: it for it in res.get("items", [])})
         return out
 
+    def comment_threads(self, video_id: str, max_results: int) -> dict:
+        """최상위 댓글만 (replies 파트를 요청하지 않음), 관련도순."""
+        params = dict(part="snippet", videoId=video_id, order="relevance",
+                      maxResults=max_results, textFormat="plainText")
+        return self._execute(self._yt.commentThreads().list(**params), "comments")
+
     def channels(self, ids: list[str]) -> dict:
         params = dict(part="snippet,statistics", id=",".join(ids), maxResults=50)
         return self._execute(self._yt.channels().list(**params), "channels")

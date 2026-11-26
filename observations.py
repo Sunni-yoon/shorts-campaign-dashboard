@@ -134,3 +134,23 @@ def formats(fsum: pd.DataFrame, other: tuple) -> str:
     if not unclassified.empty:
         parts.append(f"미분류 {int(unclassified['video_count'].iloc[0])}개")
     return " · ".join(parts)
+
+
+def reactions(kw_summary: pd.DataFrame, total_label: str = "전체") -> str:
+    """반응 섹션 관찰: 분석 규모, 전체 중앙값, 긍정 비율 중앙값 최고·최저 키워드."""
+    if kw_summary.empty:
+        return "분석한 댓글이 없습니다."
+    total = kw_summary[kw_summary["group"] == total_label]
+    if total.empty or total.iloc[0]["videos_analyzed"] == 0:
+        return "분석 댓글이 충분한 영상이 없습니다."
+    t = total.iloc[0]
+    parts = [f"영상 {t['videos_analyzed']}개(댓글 {t['comments_analyzed']:,}개) 분석",
+             f"영상별 긍정 비율 중앙값 {t['positive_rate_median']:.1%} · 부정 {t['negative_rate_median']:.1%} · "
+             f"구매의향 {t['purchase_rate_median']:.1%}"]
+    kws = kw_summary[(kw_summary["group"] != total_label)].dropna(subset=["positive_rate_median"])
+    if len(kws) >= 2:
+        hi = kws.loc[kws["positive_rate_median"].idxmax()]
+        lo = kws.loc[kws["positive_rate_median"].idxmin()]
+        parts.append(f"긍정 비율 중앙값 최고 {hi['group']} {hi['positive_rate_median']:.1%}, "
+                     f"최저 {lo['group']} {lo['positive_rate_median']:.1%}")
+    return " · ".join(parts)

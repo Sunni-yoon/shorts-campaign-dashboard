@@ -89,6 +89,36 @@ CREATE TABLE IF NOT EXISTS video_formats (   -- LLM 콘텐츠 포맷 분류 (제
     PRIMARY KEY (video_id, prompt_version)
 );
 
+-- 댓글: 개인 식별 정보(작성자 이름·채널·프로필·작성 시각)는 저장하지 않음
+CREATE TABLE IF NOT EXISTS video_comments (
+    comment_key     TEXT PRIMARY KEY,     -- YouTube 댓글 ID의 SHA-256 (원본 ID는 저장하지 않음)
+    video_id        TEXT NOT NULL REFERENCES videos(video_id),
+    rank            INTEGER,              -- 관련도 순위 1~N
+    text            TEXT,                 -- @멘션은 @user로 바꿔 저장
+    like_count      INTEGER,
+    collected_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS comment_fetches (    -- 영상별 댓글 수집 기록
+    video_id        TEXT PRIMARY KEY REFERENCES videos(video_id),
+    status          TEXT NOT NULL,        -- ok | disabled | no_comments | error
+    comment_count   INTEGER,
+    fetched_at      TEXT NOT NULL,
+    error_message   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS comment_reactions (  -- LLM 댓글 반응 분류
+    comment_key     TEXT NOT NULL REFERENCES video_comments(comment_key),
+    prompt_version  TEXT NOT NULL,
+    sentiment       TEXT NOT NULL,        -- 긍정 | 부정 | 중립
+    purchase_intent TEXT NOT NULL,        -- 있음 | 없음
+    model           TEXT NOT NULL,
+    classified_at   TEXT NOT NULL,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    PRIMARY KEY (comment_key, prompt_version)
+);
+
 CREATE TABLE IF NOT EXISTS collection_logs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id              TEXT NOT NULL REFERENCES runs(run_id),
@@ -289,6 +319,7 @@ def purge_older_than(conn, cutoff_iso: str) -> dict[str, int]:
         counts[name] = conn.execute(sql, params).rowcount
 
     old_runs = "SELECT run_id FROM runs WHERE started_at < ?"
+    no_snapshot = "SELECT video_id FROM videos WHERE video_id NOT IN (SELECT DISTINCT video_id FROM video_snapshots)"
     run("video_snapshots", "DELETE FROM video_snapshots WHERE collected_at < ?", (cutoff_iso,))
     run("channel_snapshots", "DELETE FROM channel_snapshots WHERE collected_at < ?", (cutoff_iso,))
     run("run_keyword_videos", f"DELETE FROM run_keyword_videos WHERE run_id IN ({old_runs})", (cutoff_iso,))
@@ -300,6 +331,13 @@ def purge_older_than(conn, cutoff_iso: str) -> dict[str, int]:
                                         (SELECT DISTINCT video_id FROM video_snapshots)""")
     run("video_formats", """DELETE FROM video_formats WHERE video_id NOT IN
                             (SELECT DISTINCT video_id FROM video_snapshots)""")
+    # 댓글: 수집 후 30일 지난 것 + 스냅샷이 모두 지워진 영상의 댓글 (분류 결과 → 댓글 → 수집 기록 순)
+    old_comments = f"SELECT comment_key FROM video_comments WHERE collected_at < ? OR video_id IN ({no_snapshot})"
+    run("comment_reactions", f"DELETE FROM comment_reactions WHERE comment_key IN ({old_comments})", (cutoff_iso,))
+    run("video_comments", f"DELETE FROM video_comments WHERE collected_at < ? OR video_id IN ({no_snapshot})",
+        (cutoff_iso,))
+    run("comment_fetches", f"DELETE FROM comment_fetches WHERE fetched_at < ? OR video_id IN ({no_snapshot})",
+        (cutoff_iso,))
     run("videos", "DELETE FROM videos WHERE video_id NOT IN (SELECT DISTINCT video_id FROM video_snapshots)")
     run("channels", """DELETE FROM channels WHERE channel_id NOT IN
                        (SELECT DISTINCT channel_id FROM channel_snapshots)""")

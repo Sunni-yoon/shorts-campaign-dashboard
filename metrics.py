@@ -311,6 +311,89 @@ def other_share(df: pd.DataFrame) -> tuple[float, int, int]:
     return (other / len(classified) if len(classified) else np.nan), other, int(len(classified))
 
 
+# ---------------------------------------------------------------- 댓글 반응
+REACTION_RATES = {"positive_rate": "긍정 비율", "negative_rate": "부정 비율", "purchase_rate": "구매의향 비율"}
+REACTION_REASONS = {
+    "not_fetched": "댓글 미수집",
+    "disabled": "댓글 사용 중지",
+    "no_comments": "댓글 없음",
+    "error": "댓글 수집 오류",
+    "too_few": f"분석 댓글 {config.COMMENT_MIN_PER_VIDEO}개 미만",
+}
+
+
+def load_video_reactions(db_path: Path = config.DB_PATH) -> pd.DataFrame:
+    """영상별 댓글 수집 상태와 분류 집계 (분석 댓글 수, 긍정·부정·구매의향 댓글 수)."""
+    with _connect(db_path) as conn:
+        return pd.read_sql_query(
+            """
+            SELECT cf.video_id, cf.status AS comment_status,
+                   COUNT(r.comment_key) AS comments_analyzed,
+                   SUM(CASE WHEN r.sentiment = '긍정' THEN 1 ELSE 0 END) AS positive,
+                   SUM(CASE WHEN r.sentiment = '부정' THEN 1 ELSE 0 END) AS negative,
+                   SUM(CASE WHEN r.purchase_intent = '있음' THEN 1 ELSE 0 END) AS purchase
+            FROM comment_fetches cf
+            LEFT JOIN video_comments c ON c.video_id = cf.video_id
+            LEFT JOIN comment_reactions r ON r.comment_key = c.comment_key AND r.prompt_version = ?
+            GROUP BY cf.video_id, cf.status
+            """,
+            conn, params=[config.COMMENT_PROMPT_VERSION],
+        )
+
+
+def attach_reactions(df: pd.DataFrame, reactions: pd.DataFrame,
+                     min_comments: int = config.COMMENT_MIN_PER_VIDEO) -> pd.DataFrame:
+    """영상별 비율 = 해당 댓글 수 / 분석 댓글 수. 분석 댓글이 min_comments개 미만이면 NaN + 제외 사유."""
+    out = df.drop(columns=[c for c in ("comment_status", "comments_analyzed", *REACTION_RATES,
+                                       "reaction_excluded_reason") if c in df.columns])
+    out = out.merge(reactions[["video_id", "comment_status", "comments_analyzed", "positive", "negative",
+                               "purchase"]], on="video_id", how="left")
+    out["comment_status"] = out["comment_status"].fillna("not_fetched")
+    out["comments_analyzed"] = pd.to_numeric(out["comments_analyzed"], errors="coerce").fillna(0).astype(int)
+    for src in ("positive", "negative", "purchase"):
+        out[src] = pd.to_numeric(out[src], errors="coerce")
+    enough = out["comments_analyzed"] >= min_comments
+    for col, src in (("positive_rate", "positive"), ("negative_rate", "negative"), ("purchase_rate", "purchase")):
+        out[col] = np.where(enough, out[src] / out["comments_analyzed"].where(out["comments_analyzed"] > 0), np.nan)
+    status_reason = out["comment_status"].map(
+        {"not_fetched": REACTION_REASONS["not_fetched"], "disabled": REACTION_REASONS["disabled"],
+         "no_comments": REACTION_REASONS["no_comments"], "error": REACTION_REASONS["error"]})
+    out["reaction_excluded_reason"] = np.where(
+        enough, None, status_reason.where(out["comment_status"] != "ok", REACTION_REASONS["too_few"]))
+    return out.drop(columns=["positive", "negative", "purchase"])
+
+
+def _reaction_stats(g: pd.DataFrame) -> dict:
+    inc = g[g["positive_rate"].notna()]
+    reasons = g["reaction_excluded_reason"].value_counts()
+    row = {"video_count": int(len(g)), "videos_analyzed": int(len(inc)),
+           "comments_analyzed": int(inc["comments_analyzed"].sum()),
+           "excluded_too_few": int(reasons.get(REACTION_REASONS["too_few"], 0)),
+           "excluded_no_comments": int(reasons.get(REACTION_REASONS["disabled"], 0)
+                                       + reasons.get(REACTION_REASONS["no_comments"], 0)),
+           "excluded_other": int(reasons.get(REACTION_REASONS["not_fetched"], 0)
+                                 + reasons.get(REACTION_REASONS["error"], 0))}
+    for col in REACTION_RATES:
+        row[f"{col}_mean"] = inc[col].mean() if len(inc) else np.nan
+        row[f"{col}_median"] = inc[col].median() if len(inc) else np.nan
+    return row
+
+
+def summary_reactions(df: pd.DataFrame, by: str = "keyword", total_label: str = "전체") -> pd.DataFrame:
+    """키워드별(by='keyword') 또는 포맷별(by='format') 반응 요약 — 영상별 비율의 평균·중앙값."""
+    if "positive_rate" not in df.columns:
+        return pd.DataFrame()
+    if by == "format":
+        videos = dedupe_videos(df).assign(format=lambda d: _format_labels(d))
+        order = [f for f in [*config.FORMATS, UNCLASSIFIED] if (videos["format"] == f).any()]
+        rows = [{"group": f, **_reaction_stats(videos[videos["format"] == f])} for f in order]
+    else:
+        rows = [{"group": kw, **_reaction_stats(g)} for kw, g in df.groupby("keyword", sort=True)]
+    if not df.empty:
+        rows.append({"group": total_label, **_reaction_stats(dedupe_videos(df))})
+    return pd.DataFrame(rows)
+
+
 def exclusion_summary(df: pd.DataFrame) -> pd.DataFrame:
     """지표 × 사유별 제외 영상 수 (영상 기준 중복 제거)."""
     videos = dedupe_videos(df)
@@ -367,5 +450,6 @@ def data_basis(db_path: Path = config.DB_PATH, criteria: str = config.CRITERIA,
 
 
 def load(db_path: Path = config.DB_PATH, criteria: str = config.CRITERIA) -> pd.DataFrame:
-    """load_videos + compute_metrics."""
-    return compute_metrics(load_videos(db_path, criteria))
+    """load_videos + compute_metrics + 영상별 댓글 반응 비율."""
+    df = compute_metrics(load_videos(db_path, criteria))
+    return attach_reactions(df, load_video_reactions(db_path))

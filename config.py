@@ -39,7 +39,7 @@ SHORT_MAX_SECONDS_OLD = 60    # 2024-10-15 이전 업로드
 EMBED_MAX_WIDTH = 480         # player.embedWidth/Height를 받기 위한 기준 너비
 
 # API 유닛 비용
-UNIT_COST = {"search": 100, "videos": 1, "channels": 1}
+UNIT_COST = {"search": 100, "videos": 1, "channels": 1, "comments": 1}
 
 # DB 위치 (SHORTS_DB_PATH 환경변수로 바꿀 수 있음: 테스트·배포용)
 DB_PATH = Path(os.environ.get("SHORTS_DB_PATH") or Path(__file__).parent / "data" / "shorts.db")
@@ -61,6 +61,21 @@ FORMAT_PROMPT_VERSION = "v2"          # 포맷 목록·프롬프트를 바꾸면
 FORMAT_DESCRIPTION_CHARS = 1000       # 설명은 앞부분만 보냄 (비용 절약)
 FORMAT_MIN_SAMPLE = 5                 # 이 수 미만이면 "표본 부족"
 FORMAT_OTHER_REVIEW_SHARE = 0.15      # 기타가 이 비율을 넘으면 목록 재검토
+# 댓글 반응 분석 (YouTube commentThreads + OpenAI)
+COMMENTS_PER_VIDEO = 20               # 관련도 상위 N개, 답글 제외
+COMMENT_TEXT_CHARS = 1000             # 분류에 보내는 댓글 최대 길이
+COMMENT_MIN_PER_VIDEO = 5             # 영상별 비율 계산에 필요한 최소 분석 댓글 수 (미만은 제외하고 개수 표시)
+SENTIMENTS = ["긍정", "부정", "중립"]
+PURCHASE_INTENTS = ["있음", "없음"]
+COMMENT_MODEL = "gpt-6-luna"
+COMMENT_REASONING_EFFORT = "low"      # none은 응답의 약 41%에 JSON 뒤 잡음이 붙어 실패 (2026-11-26 확인)
+COMMENT_MAX_OUTPUT_TOKENS = 300
+COMMENT_PROMPT_VERSION = "v2"         # v1: reasoning none (부분 실패, 사용 안 함) / v2: reasoning low
+COMMENT_WORKERS = 8                   # 댓글은 하나씩 독립 분류하되 동시에 여러 요청 (시간 단축)
+COMMENT_CAVEAT = ("댓글은 관련도 상위 20개만 분석, 댓글 작성자는 시청자 일부라 전체 반응을 대표하지 않음, "
+                  "긍정 댓글이 실제 구매로 이어지는지는 알 수 없음")
+
 FORMAT_ACCURACY_SAMPLE = 50           # format_eval.py 표본 크기 (정확도 검증은 생략하기로 결정 — CLAUDE.md)
-FORMAT_VALIDATION_NOTE = ("사람 검증 결과, 숏폼은 한 영상에 여러 포맷이 섞여 있어 단일 포맷 분류의 정확도를 "
-                          "정의하기 어려움. LLM 분류 결과를 그대로 사용")
+FORMAT_VALIDATION_NOTE = ("사람이 50개를 직접 라벨링한 결과 약 15개(30%)는 한 영상에 여러 포맷이 섞여 "
+                          "단일 포맷으로 정하기 어려웠음. 단일 포맷 분류의 정확도를 정의하기 어려워 "
+                          "LLM 분류 결과를 그대로 사용")

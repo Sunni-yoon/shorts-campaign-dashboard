@@ -13,8 +13,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import classify_comments
 import classify_formats
 import collect
+import collect_comments
 import config
 import db
 import keys
@@ -28,6 +30,10 @@ class CollectorState:
     last_error: str | None = None
     format_failure_at: datetime | None = None      # 포맷 분류 실패 (재시도 대기용, 수집과 별도)
     format_error: str | None = None
+    comment_failure_at: datetime | None = None     # 댓글 수집 실패
+    comment_error: str | None = None
+    reaction_failure_at: datetime | None = None    # 댓글 분류 실패
+    reaction_error: str | None = None
 
 
 def _parse(ts: str | None) -> datetime | None:
@@ -129,3 +135,71 @@ def ensure_formats(state: CollectorState, db_path: Path, progress=None, now=None
             return {"action": "failed", "error": state.format_error, "result": result}
         state.format_failure_at, state.format_error = None, None
         return {"action": "classified", "error": None, "result": result}
+
+
+# ---------------------------------------------------------------- 댓글 수집 + 반응 분류 (새 영상·새 댓글만)
+
+def pending_reaction_work(db_path: Path) -> tuple[int, int]:
+    """(댓글을 수집할 영상 수, 분류할 댓글 수)."""
+    conn = db.connect(db_path)
+    try:
+        return len(collect_comments.pending_videos(conn)), len(classify_comments.pending_comments(conn))
+    finally:
+        conn.close()
+
+
+def ensure_reactions(state: CollectorState, db_path: Path, progress=None, now=None,
+                     youtube_key_getter=lambda: keys.get_api_key(keys.KEY_NAME),
+                     openai_key_getter=lambda: keys.get_api_key(keys.OPENAI_KEY_NAME),
+                     fetcher=None, classifier=None) -> dict:
+    """새 영상의 댓글을 수집하고 새 댓글을 분류. 단계별 결과를 돌려줌 (오류 메시지는 키가 가려짐)."""
+    now = now or datetime.now(timezone.utc)
+    out = {"comments": {"action": "none"}, "reactions": {"action": "none"}}
+    if not config.AUTO_COLLECT:
+        return {"comments": {"action": "disabled"}, "reactions": {"action": "disabled"}}
+    wait = timedelta(minutes=config.RETRY_AFTER_FAILURE_MINUTES)
+    with state.lock:
+        n_videos, _ = pending_reaction_work(db_path)
+        if n_videos:
+            yt_key = youtube_key_getter()
+            if not yt_key:
+                out["comments"] = {"action": "no_key"}
+            elif state.comment_failure_at and now - state.comment_failure_at < wait:
+                out["comments"] = {"action": "retry_wait", "error": state.comment_error,
+                                   "retry_at": state.comment_failure_at + wait}
+            else:
+                conn = db.connect(db_path)
+                try:
+                    r = collect_comments.collect_pending(
+                        conn, fetcher or collect_comments.youtube_fetcher(yt_key), progress, yt_key)
+                finally:
+                    conn.close()
+                if r["stopped"] or (r["error"] and not r["ok"]):
+                    state.comment_failure_at, state.comment_error = now, "; ".join(r["errors"]) or "댓글 수집 실패"
+                    out["comments"] = {"action": "failed", "error": state.comment_error, "result": r}
+                else:
+                    state.comment_failure_at, state.comment_error = None, None
+                    out["comments"] = {"action": "collected", "result": r}
+
+        _, n_comments = pending_reaction_work(db_path)
+        if n_comments:
+            ai_key = openai_key_getter()
+            if not ai_key:
+                out["reactions"] = {"action": "no_key"}
+            elif state.reaction_failure_at and now - state.reaction_failure_at < wait:
+                out["reactions"] = {"action": "retry_wait", "error": state.reaction_error,
+                                    "retry_at": state.reaction_failure_at + wait}
+            else:
+                conn = db.connect(db_path)
+                try:
+                    r = classify_comments.classify_pending(conn, ai_key, classifier=classifier, progress=progress)
+                finally:
+                    conn.close()
+                if r["stopped"] or (r["failed"] and not r["classified"]):
+                    state.reaction_failure_at = now
+                    state.reaction_error = keys.mask("; ".join(r["errors"]) or "댓글 분류 실패", ai_key)
+                    out["reactions"] = {"action": "failed", "error": state.reaction_error, "result": r}
+                else:
+                    state.reaction_failure_at, state.reaction_error = None, None
+                    out["reactions"] = {"action": "classified", "result": r}
+    return out
