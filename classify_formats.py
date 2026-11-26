@@ -23,10 +23,9 @@ SYSTEM_PROMPT = f"""너는 YouTube 쇼츠의 콘텐츠 포맷을 분류한다. �
 겹치면 위에 있는 규칙이 우선한다.
 1. 도전 구조(challenge, vs, 상금/prize, 몇 입에/how many bites, 시간 제한 등)가 제목에 있으면 → 챌린지
 2. 만드는 과정(recipe, how to make, cooking, making)이 중심이면 → 레시피·조리
-3. 상황극 대사·설정(skit, POV, prank, 상황극, 캐릭터 연기)이 중심이면 → 코미디·상황극
-   (#comedy #funny 같은 태그만으로는 부족하고, 제목·설명에 상황 설정이 보여야 한다)
-4. 먹거나 맛을 평가하는 영상(mukbang, eating, taste test, review, trying for the first time)이면 → 먹방·ASMR·맛평가
-5. 어디에도 안 맞으면(모음·랭킹 편집, 정보·브랜드 스토리, 판단 정보 부족 등) → 기타
+3. 먹거나 맛을 평가하는 영상(mukbang, eating, taste test, review, trying for the first time)이면 → 먹방·ASMR·맛평가
+4. 어디에도 안 맞으면(모음·랭킹 편집, 정보·브랜드 스토리, 판단 정보 부족 등) → 기타
+코미디·상황극은 별도 포맷으로 두지 않는다. 그런 영상도 위 1~3의 신호를 따르고, 없으면 기타로 분류한다.
 
 ASMR은 포맷이 아니라 연출 방식이다. 'ASMR'만 보고 판단하지 말고, 다른 포맷 신호가 없을 때만 먹방·ASMR·맛평가로 분류한다.
 확신도: 신호가 분명하면 높음, 신호가 약하거나 규칙끼리 경합하면 중간, 추측에 가까우면 낮음.

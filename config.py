@@ -53,13 +53,14 @@ RETRY_AFTER_FAILURE_MINUTES = 60   # 수집 실패 후 재시도 대기
 RETENTION_DAYS = 30
 
 # 콘텐츠 포맷 분류 (OpenAI) — 정의·우선순위는 CLAUDE.md 참고
-FORMATS = ["챌린지", "레시피·조리", "먹방·ASMR·맛평가", "코미디·상황극", "기타"]
+FORMATS = ["챌린지", "레시피·조리", "먹방·ASMR·맛평가", "기타"]   # v2: 코미디·상황극 제외 (CLAUDE.md)
 FORMAT_CONFIDENCES = ["높음", "중간", "낮음"]
 FORMAT_MODEL = "gpt-6-luna"           # 2026-11-26 확인: 현행 모델 중 최저가
 FORMAT_PRICE_PER_1M = {"input": 0.10, "cached_input": 0.01, "output": 0.50}   # USD, 표준 요금
-FORMAT_PROMPT_VERSION = "v1"          # 포맷 목록·프롬프트를 바꾸면 올림 → 전체 재분류
+FORMAT_PROMPT_VERSION = "v2"          # 포맷 목록·프롬프트를 바꾸면 올림 → 전체 재분류 (v1: 5개 포맷)
 FORMAT_DESCRIPTION_CHARS = 1000       # 설명은 앞부분만 보냄 (비용 절약)
 FORMAT_MIN_SAMPLE = 5                 # 이 수 미만이면 "표본 부족"
 FORMAT_OTHER_REVIEW_SHARE = 0.15      # 기타가 이 비율을 넘으면 목록 재검토
-FORMAT_ACCURACY = None                # 사람 라벨 50개 검증 후 기입 (예: 0.86). None이면 "검증 전"
-FORMAT_ACCURACY_SAMPLE = 50
+FORMAT_ACCURACY_SAMPLE = 50           # format_eval.py 표본 크기 (정확도 검증은 생략하기로 결정 — CLAUDE.md)
+FORMAT_VALIDATION_NOTE = ("사람 검증 결과, 숏폼은 한 영상에 여러 포맷이 섞여 있어 단일 포맷 분류의 정확도를 "
+                          "정의하기 어려움. LLM 분류 결과를 그대로 사용")

@@ -410,12 +410,9 @@ b2.dataframe(ex, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- 해석 주의
 st.subheader("해석 주의")
-accuracy_text = (f"정확도는 표본 {config.FORMAT_ACCURACY_SAMPLE}개 기준 {config.FORMAT_ACCURACY:.0%}"
-                 if config.FORMAT_ACCURACY is not None
-                 else f"정확도는 표본 {config.FORMAT_ACCURACY_SAMPLE}개 사람 라벨로 검증 예정 (검증 전)")
 st.warning(
     f"""
-- **포맷은 제목·설명 기반 LLM 분류이며 {accuracy_text}입니다.** 영상 내용은 보지 않았습니다.
+- **포맷은 제목·설명 기반 LLM 분류입니다** (영상 내용은 보지 않음). {config.FORMAT_VALIDATION_NOTE}.
 - **무작위 표본이 아닙니다.** 키워드 검색의 관련도 상위 영상이라 성과가 좋은 영상 쪽으로 치우쳐 있을 수 있습니다.
 - **공유 수·시청 시간·비용·전환은 포함하지 않습니다.** YouTube Data API가 제공하지 않습니다.
 - **광고 조회수와 자연 조회수를 구분할 수 없습니다.**

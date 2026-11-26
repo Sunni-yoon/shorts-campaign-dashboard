@@ -83,7 +83,8 @@ def test_format_summary_tables_and_other_share(db_path):  # noqa: F811
     assert list(s.index) == config.FORMATS                     # 미분류 없음 → 미분류 행 없음
     assert s.loc["챌린지", "video_count"] == 2 and s.loc["챌린지", "share"] == pytest.approx(0.4)
     assert s["sample_insufficient"].all()                       # 모두 5개 미만
-    assert s.loc["코미디·상황극", "video_count"] == 0
+    assert "코미디·상황극" not in s.index                       # v2: 4개 포맷
+    assert s.loc["먹방·ASMR·맛평가", "video_count"] == 1
     assert metrics.other_share(df) == (pytest.approx(0.2), 1, 5)
     kt = metrics.keyword_format_table(df)
     assert kt.loc["k1", "합계"] == 5 and kt.loc["k2", "먹방·ASMR·맛평가"] == 1
