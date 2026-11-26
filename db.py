@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS run_keyword_videos (   -- 실행별로 어떤 키워�
     PRIMARY KEY (run_id, keyword, video_id)
 );
 
+CREATE TABLE IF NOT EXISTS video_formats (   -- LLM 콘텐츠 포맷 분류 (제목·설명·해시태그 기반)
+    video_id        TEXT NOT NULL REFERENCES videos(video_id),
+    prompt_version  TEXT NOT NULL,
+    format          TEXT NOT NULL,
+    confidence      TEXT,         -- 높음 | 중간 | 낮음
+    reason          TEXT,         -- 판단 근거 한 줄
+    model           TEXT NOT NULL,
+    classified_at   TEXT NOT NULL,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    PRIMARY KEY (video_id, prompt_version)
+);
+
 CREATE TABLE IF NOT EXISTS collection_logs (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id              TEXT NOT NULL REFERENCES runs(run_id),
@@ -285,6 +298,8 @@ def purge_older_than(conn, cutoff_iso: str) -> dict[str, int]:
                              (SELECT DISTINCT video_id FROM video_snapshots)""")
     run("run_keyword_videos_orphan", """DELETE FROM run_keyword_videos WHERE video_id NOT IN
                                         (SELECT DISTINCT video_id FROM video_snapshots)""")
+    run("video_formats", """DELETE FROM video_formats WHERE video_id NOT IN
+                            (SELECT DISTINCT video_id FROM video_snapshots)""")
     run("videos", "DELETE FROM videos WHERE video_id NOT IN (SELECT DISTINCT video_id FROM video_snapshots)")
     run("channels", """DELETE FROM channels WHERE channel_id NOT IN
                        (SELECT DISTINCT channel_id FROM channel_snapshots)""")

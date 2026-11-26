@@ -13,6 +13,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import auto_collect
+import classify_formats
 import collect
 import config
 import keys
@@ -93,6 +94,30 @@ if action in ("failed", "retry_wait", "no_key", "disabled") and last_ok:
     st.warning(f"마지막 성공 수집({_fmt_run(last_ok)}) 데이터를 표시합니다. "
                f"{config.REFRESH_HOURS}시간이 지난 데이터입니다.")
 
+# ---------------------------------------------------------------- 포맷 분류 (새 영상만, 앱을 열 때 확인)
+format_outcome = {"action": "none", "error": None}
+pending_formats = auto_collect.pending_format_count(config.DB_PATH)
+if pending_formats and config.AUTO_COLLECT:
+    with st.status(f"콘텐츠 포맷 분류 중 — 아직 분류하지 않은 영상 {pending_formats}개 (OpenAI {config.FORMAT_MODEL})",
+                   expanded=False) as fbox:
+        format_outcome = auto_collect.ensure_formats(collector_state(), config.DB_PATH, progress=fbox.write)
+        r = format_outcome.get("result") or {}
+        if format_outcome["action"] == "classified":
+            fbox.update(label=f"포맷 분류 완료 ({r.get('classified', 0)}개, 실패 {r.get('failed', 0)}개)",
+                        state="complete")
+        elif format_outcome["action"] == "no_key":
+            fbox.update(label="OpenAI 키가 없어 포맷 분류를 건너뜀", state="error")
+        elif format_outcome["action"] != "none":
+            fbox.update(label="포맷 분류를 하지 못했습니다", state="error")
+if format_outcome["action"] in ("failed", "retry_wait"):
+    fmsg = classify_formats.explain_error(format_outcome["error"])
+    if format_outcome["action"] == "retry_wait":
+        fmsg += f" — {_fmt_run(format_outcome['retry_at'].strftime('%Y-%m-%dT%H:%M:%SZ'))} 이후 방문 시 다시 시도합니다."
+    st.error(f"포맷 분류 실패: {fmsg}")
+elif format_outcome["action"] == "no_key":
+    st.warning(f"OpenAI 키가 없어 포맷 분류를 하지 않았습니다 (미분류 {pending_formats}개). 배포 환경은 Streamlit "
+               f'Secrets에 `{keys.OPENAI_KEY_NAME} = "..."`를, 로컬은 .env에 `{keys.OPENAI_KEY_NAME}=...`를 넣어 주세요.')
+
 df_all, basis = load_data(config.DB_PATH.stat().st_mtime)
 if df_all.empty:
     st.warning(f"표시할 데이터가 없습니다 (수집 기준 {config.CRITERIA}의 성공한 수집 없음).")
@@ -170,6 +195,40 @@ st.caption(
     f"구독자 대비 조회수: {metrics.exclusion_text(df, 'views_per_subscriber')} · "
     "'전체' 행은 여러 키워드에 속한 영상을 한 번만 셈"
 )
+
+# ---------------------------------------------------------------- 2-1. 포맷
+fsum = metrics.summary_by_format(df)
+other = metrics.other_share(df)
+section("어떤 포맷이 잘 퍼지나?", obs.formats(fsum, other))
+
+ftable = pd.DataFrame({
+    "포맷": fsum["format"],
+    "영상 수": fsum["video_count"],
+    "비율": fsum["share"],
+    **{f"{COLUMN_LABELS[k]} 중앙값": fsum[f"{k}_median"] for k in COLUMN_LABELS},
+    "참여율 n": fsum["engagement_rate_n"],
+    "비고": fsum["sample_insufficient"].map({True: "표본 부족", False: ""}),
+})
+st.dataframe(
+    ftable, hide_index=True, width="stretch",
+    column_config={
+        "영상 수": st.column_config.NumberColumn(format="%d", help="이 포맷으로 분류된 쇼츠 수 (중복 제외)"),
+        "비율": st.column_config.NumberColumn(format="percent", help="분류된 영상 중 이 포맷의 비율 (미분류 제외)"),
+        **{f"{label} 중앙값": st.column_config.NumberColumn(format=COLUMN_FORMATS[k], help=desc[k])
+           for k, label in COLUMN_LABELS.items()},
+        "참여율 n": st.column_config.NumberColumn(format="%d", help="참여율 계산에 쓰인 영상 수"),
+        "비고": st.column_config.TextColumn(
+            help=f"영상 {config.FORMAT_MIN_SAMPLE}개 미만 포맷은 중앙값이 우연에 크게 흔들림"),
+    },
+)
+o_share, o_n, o_total = other
+if o_total and o_share > config.FORMAT_OTHER_REVIEW_SHARE:
+    st.warning(f"기타 비율 {o_share:.1%} ({o_n}/{o_total})가 기준 {config.FORMAT_OTHER_REVIEW_SHARE:.0%}를 넘었습니다 — "
+               "포맷 목록 재검토 대상입니다 (CLAUDE.md 기준).")
+st.markdown("**키워드 × 포맷 (영상 수)**")
+st.dataframe(metrics.keyword_format_table(df), width="stretch")
+st.caption(f"포맷은 제목·설명·해시태그 기반 LLM 분류 ({config.FORMAT_MODEL}, 프롬프트 {config.FORMAT_PROMPT_VERSION}) · "
+           f"영상 {config.FORMAT_MIN_SAMPLE}개 미만은 표본 부족 · 키워드 × 포맷 표는 여러 키워드에 속한 영상을 키워드마다 셈")
 
 # ---------------------------------------------------------------- 3. 크리에이터
 channels_all = metrics.summary_by_channel(df)
@@ -351,8 +410,12 @@ b2.dataframe(ex, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- 해석 주의
 st.subheader("해석 주의")
+accuracy_text = (f"정확도는 표본 {config.FORMAT_ACCURACY_SAMPLE}개 기준 {config.FORMAT_ACCURACY:.0%}"
+                 if config.FORMAT_ACCURACY is not None
+                 else f"정확도는 표본 {config.FORMAT_ACCURACY_SAMPLE}개 사람 라벨로 검증 예정 (검증 전)")
 st.warning(
-    """
+    f"""
+- **포맷은 제목·설명 기반 LLM 분류이며 {accuracy_text}입니다.** 영상 내용은 보지 않았습니다.
 - **무작위 표본이 아닙니다.** 키워드 검색의 관련도 상위 영상이라 성과가 좋은 영상 쪽으로 치우쳐 있을 수 있습니다.
 - **공유 수·시청 시간·비용·전환은 포함하지 않습니다.** YouTube Data API가 제공하지 않습니다.
 - **광고 조회수와 자연 조회수를 구분할 수 없습니다.**

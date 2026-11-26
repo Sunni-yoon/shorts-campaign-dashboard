@@ -111,3 +111,26 @@ def distribution(df: pd.DataFrame) -> str:
                  f"({med.idxmax()} {fmt('engagement_rate', med.max())} vs "
                  f"{med.idxmin()} {fmt('engagement_rate', med.min())})")
     return text
+
+
+def formats(fsum: pd.DataFrame, other: tuple) -> str:
+    """포맷 섹션 관찰: 가장 많은 포맷, 기타 비율, 표본 충분한 포맷 중 구독자 대비 조회수 중앙값 최고·최저."""
+    classified = fsum[fsum["format"] != metrics.UNCLASSIFIED]
+    total = int(classified["video_count"].sum())
+    if total == 0:
+        return "분류된 영상이 없습니다."
+    top = classified.loc[classified["video_count"].idxmax()]
+    share, n_other, n_cls = other
+    parts = [f"분류 {total}개 중 가장 많은 포맷 {top['format']} {top['video_count']}개({top['share']:.0%})",
+             f"기타 비율 {share:.1%} ({n_other}/{n_cls})"]
+    enough = classified[~classified["sample_insufficient"]].dropna(subset=["views_per_subscriber_median"])
+    if len(enough) >= 2:
+        hi = enough.loc[enough["views_per_subscriber_median"].idxmax()]
+        lo = enough.loc[enough["views_per_subscriber_median"].idxmin()]
+        parts.append(f"표본 충분한 포맷 중 구독자 대비 조회수 중앙값 최고 {hi['format']} "
+                     f"{fmt('views_per_subscriber', hi['views_per_subscriber_median'])}, "
+                     f"최저 {lo['format']} {fmt('views_per_subscriber', lo['views_per_subscriber_median'])}")
+    unclassified = fsum[fsum["format"] == metrics.UNCLASSIFIED]
+    if not unclassified.empty:
+        parts.append(f"미분류 {int(unclassified['video_count'].iloc[0])}개")
+    return " · ".join(parts)

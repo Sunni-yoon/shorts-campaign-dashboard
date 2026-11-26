@@ -71,7 +71,7 @@ REASON_COLUMNS = {
 _VIDEOS_SQL = """
 WITH latest_run AS (   -- 해당 기준의 가장 최근 성공 search 실행
     SELECT MAX(run_id) AS run_id FROM runs
-    WHERE criteria = ? AND mode = 'search' AND status = 'ok'
+    WHERE criteria = :criteria AND mode = 'search' AND status = 'ok'
 ),
 targets AS (
     SELECT DISTINCT rkv.keyword, rkv.video_id
@@ -88,11 +88,13 @@ latest AS (
 SELECT t.keyword, v.video_id, v.title, v.published_at, v.duration_sec,
        v.embed_width, v.embed_height, v.channel_id, c.title AS channel_title,
        l.run_id AS snapshot_run_id, l.collected_at,
-       l.view_count, l.like_count, l.comment_count
+       l.view_count, l.like_count, l.comment_count,
+       f.format, f.confidence AS format_confidence, f.reason AS format_reason, f.model AS format_model
 FROM targets t
 JOIN videos v ON v.video_id = t.video_id
 JOIN latest l ON l.video_id = t.video_id AND l.rn = 1
 LEFT JOIN channels c ON c.channel_id = v.channel_id
+LEFT JOIN video_formats f ON f.video_id = t.video_id AND f.prompt_version = :prompt_version
 ORDER BY t.keyword, v.published_at
 """
 
@@ -105,7 +107,8 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 def load_videos(db_path: Path = config.DB_PATH, criteria: str = config.CRITERIA) -> pd.DataFrame:
     """수집 기준에 해당하는 쇼츠의 최신 스냅샷 + 가장 가까운 시점의 구독자 수."""
     with _connect(db_path) as conn:
-        df = pd.read_sql_query(_VIDEOS_SQL, conn, params=[criteria])
+        df = pd.read_sql_query(_VIDEOS_SQL, conn, params={
+            "criteria": criteria, "prompt_version": config.FORMAT_PROMPT_VERSION})
         channels = df["channel_id"].dropna().unique().tolist()
         if channels:
             marks = ",".join("?" * len(channels))
@@ -257,6 +260,55 @@ def summary_by_channel(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(rows, columns=cols)
     return out.sort_values("views_per_subscriber_median", ascending=False, na_position="last",
                            kind="stable").reset_index(drop=True)
+
+
+UNCLASSIFIED = "미분류"
+
+
+def _format_labels(df: pd.DataFrame) -> pd.Series:
+    col = df["format"] if "format" in df else pd.Series(index=df.index, dtype=object)
+    return col.fillna(UNCLASSIFIED)
+
+
+def summary_by_format(df: pd.DataFrame, min_sample: int = config.FORMAT_MIN_SAMPLE) -> pd.DataFrame:
+    """포맷별 요약 (영상 중복 제거). 정의된 포맷 순서대로, 미분류는 있으면 마지막.
+
+    share: 분류된 영상 중 비율 (미분류 행은 NaN) / sample_insufficient: 영상 수 < min_sample
+    """
+    videos = dedupe_videos(df)
+    videos = videos.assign(format=_format_labels(videos))
+    classified = int((videos["format"] != UNCLASSIFIED).sum())
+    order = list(config.FORMATS) + ([UNCLASSIFIED] if (videos["format"] == UNCLASSIFIED).any() else [])
+    rows = []
+    for fmt in order:
+        g = videos[videos["format"] == fmt]
+        stats = _stats(g) if not g.empty else {"video_count": 0, **{
+            f"{k}_{s}": (0 if s == "n" else np.nan) for k in METRICS for s in ("mean", "median", "n")},
+            "views_per_subscriber_over_1_share": np.nan}
+        rows.append({
+            "format": fmt, **stats,
+            "share": (len(g) / classified if classified else np.nan) if fmt != UNCLASSIFIED else np.nan,
+            "sample_insufficient": fmt != UNCLASSIFIED and len(g) < min_sample,
+        })
+    return pd.DataFrame(rows)
+
+
+def keyword_format_table(df: pd.DataFrame) -> pd.DataFrame:
+    """키워드 × 포맷 영상 수. 한 영상이 여러 키워드에 속하면 키워드마다 셈."""
+    labels = _format_labels(df)
+    table = pd.crosstab(df["keyword"], labels)
+    columns = list(config.FORMATS) + ([UNCLASSIFIED] if UNCLASSIFIED in table.columns else [])
+    table = table.reindex(columns=columns, fill_value=0)
+    table["합계"] = table.sum(axis=1)
+    return table
+
+
+def other_share(df: pd.DataFrame) -> tuple[float, int, int]:
+    """(기타 비율, 기타 수, 분류된 영상 수) — 영상 중복 제거, 미분류 제외."""
+    labels = _format_labels(dedupe_videos(df))
+    classified = labels[labels != UNCLASSIFIED]
+    other = int((classified == "기타").sum())
+    return (other / len(classified) if len(classified) else np.nan), other, int(len(classified))
 
 
 def exclusion_summary(df: pd.DataFrame) -> pd.DataFrame:

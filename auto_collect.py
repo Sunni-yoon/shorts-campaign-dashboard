@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import classify_formats
 import collect
 import config
 import db
@@ -25,6 +26,8 @@ class CollectorState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     last_failure_at: datetime | None = None
     last_error: str | None = None
+    format_failure_at: datetime | None = None      # 포맷 분류 실패 (재시도 대기용, 수집과 별도)
+    format_error: str | None = None
 
 
 def _parse(ts: str | None) -> datetime | None:
@@ -87,3 +90,42 @@ def ensure_fresh_data(state: CollectorState, db_path: Path, progress=None, now=N
         state.last_error = keys.mask(result["error"] or result["status"], api_key)
         _, last = check(db_path, now)
         return {"action": "failed", "last_success": last, "error": state.last_error, "result": result}
+
+
+# ---------------------------------------------------------------- 포맷 분류 (새 영상만)
+
+def pending_format_count(db_path: Path) -> int:
+    conn = db.connect(db_path)
+    try:
+        return len(classify_formats.pending_videos(conn))
+    finally:
+        conn.close()
+
+
+def ensure_formats(state: CollectorState, db_path: Path, progress=None, now=None,
+                   api_key_getter=lambda: keys.get_api_key(keys.OPENAI_KEY_NAME), classifier=None) -> dict:
+    """최신 v2 실행의 미분류 쇼츠만 분류. 반환: action = none | classified | failed | retry_wait | no_key | disabled."""
+    now = now or datetime.now(timezone.utc)
+    if pending_format_count(db_path) == 0:
+        return {"action": "none", "error": None}
+    if not config.AUTO_COLLECT:
+        return {"action": "disabled", "error": None}
+    api_key = api_key_getter()
+    if not api_key:
+        return {"action": "no_key", "error": None}
+    with state.lock:
+        if state.format_failure_at and now - state.format_failure_at < timedelta(
+                minutes=config.RETRY_AFTER_FAILURE_MINUTES):
+            return {"action": "retry_wait", "error": state.format_error,
+                    "retry_at": state.format_failure_at + timedelta(minutes=config.RETRY_AFTER_FAILURE_MINUTES)}
+        conn = db.connect(db_path)
+        try:
+            result = classify_formats.classify_pending(conn, api_key, classifier=classifier, progress=progress)
+        finally:
+            conn.close()
+        if result["failed"] and not result["classified"] or result["stopped"]:
+            state.format_failure_at = now
+            state.format_error = keys.mask("; ".join(result["errors"]) or "분류 실패", api_key)
+            return {"action": "failed", "error": state.format_error, "result": result}
+        state.format_failure_at, state.format_error = None, None
+        return {"action": "classified", "error": None, "result": result}

@@ -8,6 +8,7 @@
 
 1. **우리 캠페인 기준선은?** 조회수·조회수 속도·참여율·구독자 대비 조회수의 중앙값
 2. **어떤 주제가 잘 퍼지나?** 키워드별 평균·중앙값 요약표
+   - **어떤 포맷이 잘 퍼지나?** LLM으로 분류한 콘텐츠 포맷별 성과, 키워드 × 포맷 표
 3. **어떤 크리에이터와 일할까?** 채널 단위 집계, 구독자 수 범위 필터
 4. **무엇을 참고해 만들까?** 지표별 상위 영상과 YouTube 링크
 5. **세부 분포** 키워드별 참여율 분포, 조회수 vs 참여율
@@ -48,7 +49,25 @@ YouTube API에는 쇼츠 여부 필드가 없어서, YouTube 공식 기준을 �
 - 2024-10-15 이전 업로드: 60초 이하
 - 화면 비율은 `videos.list`의 `player.embedWidth/embedHeight`로 판단합니다.
 
+### 콘텐츠 포맷 분류 (OpenAI)
+
+제목·설명·해시태그만 보고 포맷 하나를 고릅니다. 영상 내용은 보지 않습니다.
+
+- 포맷: 챌린지 / 레시피·조리 / 먹방·ASMR·맛평가 / 코미디·상황극 / 기타
+- 겹치면 위의 규칙이 우선합니다.
+  1. 제목에 도전 구조(challenge, vs, 상금, 몇 입에)가 있으면 챌린지
+  2. 만드는 과정이 중심이면 레시피·조리
+  3. 상황극 대사·설정이 중심이면 코미디·상황극
+  4. 먹거나 맛을 평가하는 영상이면 먹방·ASMR·맛평가
+  5. 어디에도 안 맞으면 기타
+- ASMR은 포맷이 아니라 연출 방식이라 독립 분류로 두지 않습니다.
+- 출력은 JSON 스키마로 강제합니다(포맷, 확신도, 근거 한 줄). 모델·프롬프트 버전·분류 시각을 함께 저장합니다.
+- 같은 프롬프트 버전으로 이미 분류한 영상은 다시 분류하지 않습니다.
+- 검증: 무작위 50개를 사람이 라벨링해 정확도와 오분류 패턴을 측정합니다(`format_eval.py`). 기타 비율이 15%를 넘으면 포맷 목록을 다시 검토합니다.
+
 ## 한계
+
+- **포맷은 제목·설명 기반 LLM 분류입니다.** 정확도는 사람 라벨 50개 표본 기준이며, 영상 내용과 다를 수 있습니다.
 
 - **무작위 표본이 아닙니다.** 키워드 검색의 관련도 상위 영상이라 성과가 좋은 영상 쪽으로 치우쳐 있을 수 있습니다.
 - **공유 수·시청 시간·비용·전환은 포함하지 않습니다.** YouTube Data API가 제공하지 않습니다.
@@ -67,10 +86,11 @@ python -m venv venv
 venv\Scripts\python.exe -m pip install -r requirements.txt     # macOS/Linux: venv/bin/python
 ```
 
-프로젝트 폴더에 `.env` 파일을 만들고 YouTube Data API v3 키를 넣습니다. 이 파일은 git에서 제외됩니다.
+프로젝트 폴더에 `.env` 파일을 만들고 API 키를 넣습니다. 이 파일은 git에서 제외됩니다. OpenAI 키가 없으면 포맷 분류만 건너뜁니다.
 
 ```
 YOUTUBE_API_KEY=발급받은_키
+OPENAI_API_KEY=발급받은_키
 ```
 
 ```bash
@@ -78,6 +98,9 @@ venv\Scripts\python.exe -m streamlit run dashboard.py   # 대시보드 (데이�
 venv\Scripts\python.exe collect.py search               # 명령줄에서 직접 수집
 venv\Scripts\python.exe collect.py refresh              # 저장된 쇼츠의 지표만 갱신 (약 10유닛)
 venv\Scripts\python.exe collect.py purge                # 30일 지난 데이터 삭제
+venv\Scripts\python.exe classify_formats.py             # 미분류 쇼츠의 포맷 분류 (OpenAI)
+venv\Scripts\python.exe format_eval.py export           # 라벨링용 무작위 50개 CSV (LLM 결과 숨김)
+venv\Scripts\python.exe format_eval.py evaluate         # 라벨과 비교해 정확도·혼동표·오분류 목록
 venv\Scripts\python.exe -m pytest tests                 # 테스트
 ```
 
@@ -90,6 +113,7 @@ venv\Scripts\python.exe -m pytest tests                 # 테스트
 2. Advanced settings → Secrets에 다음을 입력합니다.
    ```toml
    YOUTUBE_API_KEY = "발급받은_키"
+   OPENAI_API_KEY = "발급받은_키"
    ```
 3. Google Cloud Console에서 이 키의 API 제한을 YouTube Data API v3로만 설정하기를 권장합니다.
 
@@ -101,6 +125,8 @@ venv\Scripts\python.exe -m pytest tests                 # 테스트
 ├── observations.py     # 섹션별 관찰 문장 생성 (숫자 사실만)
 ├── auto_collect.py     # 앱을 열 때 24시간 경과 확인 → 수집, 동시 접속 잠금, 실패 후 재시도 대기
 ├── collect.py          # YouTube API 수집 (search / refresh / reclassify / purge)
+├── classify_formats.py # 콘텐츠 포맷 LLM 분류 (OpenAI, 미분류 영상만)
+├── format_eval.py      # 포맷 분류 검증 (라벨링 표본 내보내기, 정확도 계산)
 ├── db.py               # SQLite 스키마·저장·30일 삭제
 ├── keys.py             # API 키 읽기 (.env → Streamlit Secrets), 키 가리기
 ├── config.py           # 키워드·수집 기준·판정 기준·보관 기간 설정
