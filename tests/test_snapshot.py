@@ -67,7 +67,7 @@ def test_ensure_snapshot_downloads_when_empty(db_path, tmp_path, monkeypatch):  
     out, _ = _build(db_path, tmp_path)
     target = tmp_path / "deploy" / "shorts.db"
     fetcher, calls = _fake_repo(out)
-    g = _getter({"DATA_REPO": "owner/popow-demo-data", "DATA_TOKEN": FAKE_TOKEN})
+    g = _getter({"DATA_REPO": "owner/data-repo", "DATA_TOKEN": FAKE_TOKEN})
     r = snapshot.ensure_snapshot(target, getter=g, fetcher=fetcher)
     assert r["action"] == "downloaded" and snapshot.has_data(target)
     assert [p for _, p in calls] == ["snapshot.json", "shorts_snapshot.db"]
@@ -79,7 +79,7 @@ def test_ensure_snapshot_rejects_bad_hash_and_masks_token(db_path, tmp_path, mon
     monkeypatch.setattr(config, "CRITERIA", V2)
     out, _ = _build(db_path, tmp_path)
     target = tmp_path / "deploy" / "shorts.db"
-    g = _getter({"DATA_REPO": "owner/popow-demo-data", "DATA_TOKEN": FAKE_TOKEN})
+    g = _getter({"DATA_REPO": "owner/data-repo", "DATA_TOKEN": FAKE_TOKEN})
     fetcher, _ = _fake_repo(out, sha="0" * 64)
     r = snapshot.ensure_snapshot(target, getter=g, fetcher=fetcher)
     assert r["action"] == "failed" and not target.exists() and "해시" in r["error"]
