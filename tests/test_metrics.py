@@ -125,9 +125,7 @@ def test_summary_and_exclusions_dedupe(db_path):
     assert s.loc["k2", "video_count"] == 1
     assert s.loc["전체", "video_count"] == 5    # E는 한 번만
     assert s.loc["전체", "engagement_rate_n"] == 4
-    ex = metrics.exclusion_summary(df)
-    total = ex[(ex.metric == "참여율") & (ex.reason == "합계")]["count"].item()
-    assert total == 1
+    assert metrics.excluded_count(df, "engagement_rate") == 1          # 제외 기준은 계산에 그대로
     assert metrics.excluded_count(df, "views_per_subscriber") == 2   # C 비공개 + D 1,000명 미만
     assert metrics.exclusion_text(df, "engagement_rate") == "계산 제외 1개 — 좋아요 숨김 1개"
     assert metrics.exclusion_text(df, "views") == "제외 없음"

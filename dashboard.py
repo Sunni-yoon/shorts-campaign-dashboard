@@ -632,8 +632,7 @@ REFRESH_NOTE = (f"스냅샷 데이터 — 배포 앱은 자동 수집 안 함, �
 sc = basis.get("search_criteria", {})
 rule = basis["short_rule"]
 fmt_ts = lambda t: t.strftime("%Y-%m-%d %H:%M UTC") if t is not None else "-"  # noqa: E731
-b1, b2 = st.columns(2)
-b1.markdown(
+st.markdown(
     f"""
 **수집 기준** `{basis['criteria']}`
 - 검색: {sc.get('order', '-')}순(관련도순), 지역 {sc.get('region_code', '-')}, 언어 {sc.get('relevance_language', '-')}
@@ -669,9 +668,6 @@ b1.markdown(
 - 기본 최솟값 1,000명: 구독자가 아주 적은 채널은 발굴 대상으로 의미가 없어 기본 제외함. 구독자 {config.VPS_MIN_SUBSCRIBERS:,}명 미만 채널은 구독자 대비 조회수를 계산하지 않음(빈 칸).
 """
 )
-ex = metrics.exclusion_summary(df).rename(columns={"metric": "지표", "reason": "사유", "count": "영상 수"})
-b2.markdown("**지표별 제외 영상 (현재 필터 기준, 영상 중복 제거)**")
-b2.dataframe(ex, hide_index=True, width="stretch")
 
 # ---------------------------------------------------------------- 해석 주의
 st.subheader("해석 주의")

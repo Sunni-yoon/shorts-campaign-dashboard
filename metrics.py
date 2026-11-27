@@ -669,18 +669,6 @@ def summary_reactions(df: pd.DataFrame, by: str = "keyword", total_label: str = 
     return pd.DataFrame(rows)
 
 
-def exclusion_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """지표 × 사유별 제외 영상 수 (영상 기준 중복 제거)."""
-    videos = dedupe_videos(df)
-    rows = []
-    for key, label in METRICS.items():
-        reasons = videos[REASON_COLUMNS[key]].dropna()
-        for reason, count in reasons.value_counts().items():
-            rows.append({"metric": label, "reason": reason, "count": int(count)})
-        rows.append({"metric": label, "reason": "합계", "count": int(len(reasons))})
-    return pd.DataFrame(rows, columns=["metric", "reason", "count"])
-
-
 def excluded_count(df: pd.DataFrame, metric: str) -> int:
     """해당 지표 계산에서 제외된 영상 수 (영상 기준)."""
     return int(dedupe_videos(df)[REASON_COLUMNS[metric]].notna().sum())
