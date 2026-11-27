@@ -355,10 +355,6 @@ NOTE_HELP = (f"{config.FORMAT_EXCLUDED_FROM_COMPARISON}: 종이 DIY·랭킹·밈
              "중앙값이 우연에 크게 흔들려 표본 부족")
 num_fmt["비고"] = st.column_config.TextColumn(help=NOTE_HELP)
 st.dataframe(table, hide_index=True, width="stretch", column_config=num_fmt)
-o_share, o_n, o_total = other
-if o_total and o_share > config.FORMAT_OTHER_REVIEW_SHARE:
-    st.warning(f"기타 비율 {o_share:.1%} ({o_n}/{o_total})가 기준 {config.FORMAT_OTHER_REVIEW_SHARE:.0%}를 넘음 — "
-               "포맷 목록 재검토 대상 (CLAUDE.md 기준).")
 st.caption(
     f"참여율: {metrics.exclusion_text(df, 'engagement_rate')} (0으로 넣지 않음) · "
     f"구독자 대비 조회수: {metrics.exclusion_text(df, 'views_per_subscriber')} · "
@@ -430,7 +426,6 @@ else:
         + (f", 미수집·오류 {t0['excluded_other']}개" if t0["excluded_other"] else "")
         + f" · 감성·구매의향은 댓글 하나씩 LLM 분류 ({config.COMMENT_MODEL}, 프롬프트 {config.COMMENT_PROMPT_VERSION})"
         " · 개인정보 보호를 위해 댓글 원문은 표시하지 않음")
-st.warning(f"- {config.CAVEAT_COMMENT_TARGET}")
 
 # ---------------------------------------------------------------- 4. 크리에이터
 channels_all = metrics.summary_by_channel(df)
@@ -671,4 +666,9 @@ st.markdown(
 
 # ---------------------------------------------------------------- 해석 주의
 st.subheader("해석 주의")
-st.warning("\n".join(f"- {line}" for line in config.CAVEATS))
+caveats = list(config.CAVEATS)
+o_share, o_n, o_total = other
+if o_total and o_share > config.FORMAT_OTHER_REVIEW_SHARE:
+    caveats.append(f"기타 비율: {o_share:.1%} ({o_n}/{o_total})로 기준 {config.FORMAT_OTHER_REVIEW_SHARE:.0%}를 넘음 — "
+                   "포맷 목록 재검토 대상.")
+st.warning("\n".join(f"- {line}" for line in caveats))

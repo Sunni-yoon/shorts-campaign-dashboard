@@ -105,4 +105,3 @@ CAVEATS = [
     "않으며, 구매의향 댓글이 실제 구매로 이어졌는지는 알 수 없음.",
     "댓글 감성의 대상: 감성은 댓글 전체 분위기로 판단하며 대상(제품·출연자·연출)을 구분하지 않음.",
 ]
-CAVEAT_COMMENT_TARGET = next(c for c in CAVEATS if c.startswith("댓글 감성의 대상"))   # 반응 섹션에도 같은 문장 표시
