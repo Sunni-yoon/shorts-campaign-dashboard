@@ -19,12 +19,18 @@ import config
 import db
 import keys
 
+# 감성 정의 — 프롬프트와 대시보드 설명이 같은 문구를 씀 (바꾸면 프롬프트가 바뀌므로 COMMENT_PROMPT_VERSION을 올릴 것)
+SENTIMENT_DEFINITIONS = {
+    "긍정": "칭찬, 좋아함, 맛있어 보임, 감탄, 응원",
+    "부정": "비판, 싫어함, 역겨움, 불만, 조롱",
+    "중립": "질문, 정보, 사실 진술, 섞인 감정, 의미를 판단할 수 없음",
+}
+_SENTIMENT_LINES = "\n".join(f"- {k}: {v}" for k, v in SENTIMENT_DEFINITIONS.items())
+
 SYSTEM_PROMPT = f"""너는 YouTube 쇼츠(라면·매운 음식 영상)에 달린 댓글 하나의 반응을 분류한다. 댓글 하나만 보고 판단한다.
 
 sentiment (하나만): {" / ".join(config.SENTIMENTS)}
-- 긍정: 칭찬, 좋아함, 맛있어 보임, 감탄, 응원
-- 부정: 비판, 싫어함, 역겨움, 불만, 조롱
-- 중립: 질문, 정보, 사실 진술, 섞인 감정, 의미를 판단할 수 없음
+{_SENTIMENT_LINES}
 purchase_intent: {" / ".join(config.PURCHASE_INTENTS)} — sentiment와 별도로 판단한다.
 - 있음: 제품을 사거나 먹어 보려는 의사·관심 (예: "where can I buy", "I need to try this", "going to get some",
   "어디서 사요", "먹어 보고 싶다", "사러 간다")
@@ -84,7 +90,7 @@ class OpenAICommentClassifier:
 
 
 def pending_comments(conn, prompt_version: str | None = None) -> list[tuple[str, str]]:
-    """최신 v2 실행 쇼츠의 댓글 중 이 프롬프트 버전으로 아직 분류하지 않은 것 (comment_key, text)."""
+    """최신 실행(현재 수집 기준) 쇼츠의 댓글 중 이 프롬프트 버전으로 아직 분류하지 않은 것 (comment_key, text)."""
     prompt_version = prompt_version or config.COMMENT_PROMPT_VERSION
     return conn.execute(
         """

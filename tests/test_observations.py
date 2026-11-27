@@ -27,7 +27,7 @@ def test_references_and_distribution(db_path):  # noqa: F811
     top = metrics.dedupe_videos(df).sort_values("views", ascending=False).head(2)
     text = obs.references(top, "views")
     assert text.startswith("조회수 1위: title E (2,000)")
-    assert "k1 2개" in text and "k2 1개" in text
+    assert "포맷 분포: 미분류 2개" in text                      # 키워드 대신 포맷 분포 (fixture는 미분류)
     assert obs.distribution(df).startswith("참여율 범위 2.00% ~ ")
 
 

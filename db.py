@@ -86,7 +86,24 @@ CREATE TABLE IF NOT EXISTS video_formats (   -- LLM 콘텐츠 포맷 분류 (제
     classified_at   TEXT NOT NULL,
     input_tokens    INTEGER,
     output_tokens   INTEGER,
+    agreement       INTEGER,      -- 최종 포맷이 나온 회차 수 (FORMAT_TRIALS회 중). 모두 다르면 1. NULL = 단일 분류(v3 이전)
+    trial_formats   TEXT,         -- 회차별 포맷을 '/'로 연결 (예: 챌린지/챌린지/기타)
     PRIMARY KEY (video_id, prompt_version)
+);
+
+-- 포맷 분류 회차별 원본 결과 (다수결 전). 최종 결과는 video_formats
+CREATE TABLE IF NOT EXISTS video_format_trials (
+    video_id        TEXT NOT NULL REFERENCES videos(video_id),
+    prompt_version  TEXT NOT NULL,
+    trial           INTEGER NOT NULL,   -- 1부터
+    format          TEXT NOT NULL,
+    confidence      TEXT,
+    reason          TEXT,
+    model           TEXT NOT NULL,
+    classified_at   TEXT NOT NULL,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    PRIMARY KEY (video_id, prompt_version, trial)
 );
 
 -- 댓글: 개인 식별 정보(작성자 이름·채널·프로필·작성 시각)는 저장하지 않음
@@ -145,9 +162,21 @@ def connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
     _migrate_runs_columns(conn)
+    _migrate_format_columns(conn)
     conn.executescript(SCHEMA)
     _backfill_v1(conn)
     return conn
+
+
+def _migrate_format_columns(conn) -> None:
+    """기존 DB의 video_formats에 다수결 컬럼(agreement, trial_formats)이 없으면 추가."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(video_formats)")}
+    if not cols:
+        return
+    for col, typ in (("agreement", "INTEGER"), ("trial_formats", "TEXT")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE video_formats ADD COLUMN {col} {typ}")
+    conn.commit()
 
 
 def _migrate_runs_columns(conn) -> None:
@@ -331,6 +360,8 @@ def purge_older_than(conn, cutoff_iso: str) -> dict[str, int]:
                                         (SELECT DISTINCT video_id FROM video_snapshots)""")
     run("video_formats", """DELETE FROM video_formats WHERE video_id NOT IN
                             (SELECT DISTINCT video_id FROM video_snapshots)""")
+    run("video_format_trials", """DELETE FROM video_format_trials WHERE video_id NOT IN
+                                  (SELECT DISTINCT video_id FROM video_snapshots)""")
     # 댓글: 수집 후 30일 지난 것 + 스냅샷이 모두 지워진 영상의 댓글 (분류 결과 → 댓글 → 수집 기록 순)
     old_comments = f"SELECT comment_key FROM video_comments WHERE collected_at < ? OR video_id IN ({no_snapshot})"
     run("comment_reactions", f"DELETE FROM comment_reactions WHERE comment_key IN ({old_comments})", (cutoff_iso,))

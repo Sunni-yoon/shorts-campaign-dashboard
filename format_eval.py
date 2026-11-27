@@ -45,7 +45,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def export(n: int = config.FORMAT_ACCURACY_SAMPLE, overwrite: bool = False) -> Path:
-    """최신 v2 실행의 분류된 쇼츠 중 n개를 고정 시드로 무작위 추출. LLM 결과 열은 넣지 않음."""
+    """최신 실행(현재 수집 기준)의 분류된 쇼츠 중 n개를 고정 시드로 무작위 추출. LLM 결과 열은 넣지 않음."""
     if SAMPLE_PATH.exists() and not overwrite:
         raise FileExistsError(f"{SAMPLE_PATH}가 이미 있습니다 (라벨 보호). 새로 만들려면 --overwrite")
     with _connect() as conn:

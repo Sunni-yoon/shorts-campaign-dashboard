@@ -5,6 +5,7 @@ metrics.py가 계산한 결과만 받아 숫자로 확인되는 사실을 문장
 """
 import pandas as pd
 
+import config
 import metrics
 
 LABELS = {
@@ -91,10 +92,10 @@ def references(top: pd.DataFrame, sort_key: str) -> str:
     if valid.empty:
         return f"{LABELS[sort_key]}를 계산할 수 있는 영상이 없음."
     r = valid.iloc[0]
-    counts = top["keywords"].str.split(", ").explode().value_counts()
-    by_kw = ", ".join(f"{kw} {n}개" for kw, n in counts.items())
+    counts = metrics._format_labels(top).value_counts()
+    by_fmt = ", ".join(f"{f} {n}개" for f, n in counts.items())
     return (f"{LABELS[sort_key]} 1위: {_short(r['title'])} ({fmt(sort_key, r[sort_key])}) · "
-            f"표시된 {len(top)}개의 키워드 분포: {by_kw}")
+            f"표시된 {len(top)}개의 포맷 분포: {by_fmt}")
 
 
 def distribution(df: pd.DataFrame) -> str:
@@ -105,17 +106,17 @@ def distribution(df: pd.DataFrame) -> str:
     text = (f"참여율 범위 {fmt('engagement_rate', v['engagement_rate'].min())} ~ "
             f"{fmt('engagement_rate', v['engagement_rate'].max())} · "
             f"조회수 범위 {fmt('views', v['views'].min())} ~ {fmt('views', v['views'].max())}")
-    med = er.groupby("keyword")["engagement_rate"].median()
+    med = v.assign(format=metrics._format_labels(v)).groupby("format")["engagement_rate"].median()
     if len(med) >= 2:
-        text += (f" · 키워드별 참여율 중앙값 차이 최대 {(med.max() - med.min()) * 100:.2f}%p "
+        text += (f" · 포맷별 참여율 중앙값 차이 최대 {(med.max() - med.min()) * 100:.2f}%p "
                  f"({med.idxmax()} {fmt('engagement_rate', med.max())} vs "
                  f"{med.idxmin()} {fmt('engagement_rate', med.min())})")
     return text
 
 
-def formats(fsum: pd.DataFrame, other: tuple) -> str:
+def formats(fsum: pd.DataFrame, other: tuple, total_label: str = "전체") -> str:
     """포맷 섹션 관찰: 가장 많은 포맷, 기타 비율, 표본 충분한 포맷 중 구독자 대비 조회수 중앙값 최고·최저."""
-    classified = fsum[fsum["format"] != metrics.UNCLASSIFIED]
+    classified = fsum[~fsum["format"].isin([metrics.UNCLASSIFIED, total_label])]
     total = int(classified["video_count"].sum())
     if total == 0:
         return "분류된 영상이 없음."
@@ -123,11 +124,13 @@ def formats(fsum: pd.DataFrame, other: tuple) -> str:
     share, n_other, n_cls = other
     parts = [f"분류 {total}개 중 가장 많은 포맷 {top['format']} {top['video_count']}개({top['share']:.0%})",
              f"기타 비율 {share:.1%} ({n_other}/{n_cls})"]
-    enough = classified[~classified["sample_insufficient"]].dropna(subset=["views_per_subscriber_median"])
+    enough = classified[~classified["sample_insufficient"]
+                        & (classified["format"] != config.FORMAT_EXCLUDED_FROM_COMPARISON)
+                        ].dropna(subset=["views_per_subscriber_median"])
     if len(enough) >= 2:
         hi = enough.loc[enough["views_per_subscriber_median"].idxmax()]
         lo = enough.loc[enough["views_per_subscriber_median"].idxmin()]
-        parts.append(f"표본 충분한 포맷 중 구독자 대비 조회수 중앙값 최고 {hi['format']} "
+        parts.append(f"표본 충분한 포맷 중(기타 제외) 구독자 대비 조회수 중앙값 최고 {hi['format']} "
                      f"{fmt('views_per_subscriber', hi['views_per_subscriber_median'])}, "
                      f"최저 {lo['format']} {fmt('views_per_subscriber', lo['views_per_subscriber_median'])}")
     unclassified = fsum[fsum["format"] == metrics.UNCLASSIFIED]
@@ -137,7 +140,7 @@ def formats(fsum: pd.DataFrame, other: tuple) -> str:
 
 
 def reactions(kw_summary: pd.DataFrame, total_label: str = "전체") -> str:
-    """반응 섹션 관찰: 분석 규모, 전체 중앙값, 긍정 비율 중앙값 최고·최저 키워드."""
+    """반응 섹션 관찰: 분석 규모, 전체 중앙값, 긍정 비율 중앙값 최고·최저 그룹(포맷 또는 키워드)."""
     if kw_summary.empty:
         return "분석한 댓글이 없음."
     total = kw_summary[kw_summary["group"] == total_label]
@@ -147,7 +150,8 @@ def reactions(kw_summary: pd.DataFrame, total_label: str = "전체") -> str:
     parts = [f"영상 {t['videos_analyzed']}개(댓글 {t['comments_analyzed']:,}개) 분석",
              f"영상별 긍정 비율 중앙값 {t['positive_rate_median']:.1%} · 부정 {t['negative_rate_median']:.1%} · "
              f"구매의향 {t['purchase_rate_median']:.1%}"]
-    kws = kw_summary[(kw_summary["group"] != total_label)].dropna(subset=["positive_rate_median"])
+    kws = kw_summary[~kw_summary["group"].isin([total_label, metrics.UNCLASSIFIED,
+                                                 config.FORMAT_EXCLUDED_FROM_COMPARISON])].dropna(subset=["positive_rate_median"])
     if len(kws) >= 2:
         hi = kws.loc[kws["positive_rate_median"].idxmax()]
         lo = kws.loc[kws["positive_rate_median"].idxmin()]

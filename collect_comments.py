@@ -1,6 +1,6 @@
 """영상별 상위 댓글 수집 (YouTube commentThreads.list, 영상당 1유닛).
 
-- 최신 v2 search 실행의 쇼츠 중 아직 수집하지 않은 영상만
+- 최신 search 실행(현재 수집 기준)의 쇼츠 중 아직 수집하지 않은 영상만
 - 관련도 상위 config.COMMENTS_PER_VIDEO개, 답글 제외 (replies 파트를 요청하지 않음)
 - 저장: 댓글 텍스트(@멘션 → @user), 좋아요 수, 순위, 수집 시각
 - 저장하지 않음: 작성자 이름·채널 ID·프로필 이미지·작성 시각, 원본 댓글 ID (SHA-256 해시만 저장)
@@ -45,7 +45,7 @@ def parse_threads(response: dict) -> list[dict]:
 
 
 def pending_videos(conn) -> list[tuple[str, int | None]]:
-    """최신 v2 search 실행의 쇼츠 중 댓글을 아직 수집하지 않은 영상 (video_id, 최신 스냅샷 댓글 수)."""
+    """최신 search 실행(현재 수집 기준)의 쇼츠 중 댓글을 아직 수집하지 않은 영상 (video_id, 최신 스냅샷 댓글 수)."""
     return conn.execute(
         """
         SELECT DISTINCT v.video_id,
@@ -123,7 +123,7 @@ def youtube_fetcher(api_key: str):
 
 
 def status_counts(conn) -> dict[str, int]:
-    """최신 v2 실행 쇼츠의 댓글 수집 상태별 영상 수."""
+    """최신 실행(현재 수집 기준) 쇼츠의 댓글 수집 상태별 영상 수."""
     rows = conn.execute(
         """
         SELECT COALESCE(cf.status, 'not_fetched'), COUNT(DISTINCT v.video_id)
@@ -155,7 +155,7 @@ def main() -> int:
     print(f"댓글 {r['comments']:,}개 저장 · 사용 유닛 ≈ {r['units']}")
     for err in r["errors"]:
         print(f"  ! {collect.explain_error(err)}")
-    print(f"최신 v2 쇼츠 상태별 영상 수: {counts}")
+    print(f"최신 {config.CRITERIA} 쇼츠 상태별 영상 수: {counts}")
     return 0 if not (r["error"] or r["stopped"]) else 2
 
 

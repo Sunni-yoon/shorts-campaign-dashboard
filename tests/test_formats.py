@@ -51,12 +51,17 @@ def test_parse_response():
 def test_classifies_only_pending_and_records_meta(db_path):  # noqa: F811
     clf = FakeClassifier()
     r = _classify(db_path, clf)
-    assert r["classified"] == 5 and r["failed"] == 0 and sorted(clf.calls) == list("ABCDE")   # G(쇼츠 아님) 제외
-    assert r["cost_usd"] == pytest.approx(5 * (300 * 0.10 + 100 * 0.01 + 50 * 0.50) / 1e6)
+    t = config.FORMAT_TRIALS
+    assert r["classified"] == 5 and r["failed"] == 0
+    assert sorted(clf.calls) == sorted(list("ABCDE") * t)                 # 영상마다 t회, G(쇼츠 아님) 제외
+    assert r["cost_usd"] == pytest.approx(5 * t * (300 * 0.10 + 100 * 0.01 + 50 * 0.50) / 1e6)
     conn = db.connect(db_path)
-    row = conn.execute("SELECT model, prompt_version, classified_at FROM video_formats WHERE video_id='A'").fetchone()
+    row = conn.execute("SELECT model, prompt_version, classified_at, agreement, trial_formats "
+                       "FROM video_formats WHERE video_id='A'").fetchone()
+    n_trials = conn.execute("SELECT COUNT(*) FROM video_format_trials WHERE video_id='A'").fetchone()[0]
     conn.close()
     assert row[0] == "fake-model" and row[1] == config.FORMAT_PROMPT_VERSION and row[2]
+    assert row[3] == t and row[4] == "/".join(["챌린지"] * t) and n_trials == t
     clf2 = FakeClassifier()
     assert _classify(db_path, clf2)["pending"] == 0 and clf2.calls == []      # 다시 분류하지 않음
 
@@ -129,3 +134,211 @@ def test_export_and_evaluate(db_path, tmp_path, monkeypatch):  # noqa: F811
     assert len(pd.read_csv(tmp_path / "e.csv", encoding="utf-8-sig")) == 1
     with pytest.raises(FileExistsError):
         format_eval.export(n=5)                                 # 라벨 파일 덮어쓰기 방지
+
+
+def test_format_summary_total_row(db_path):  # noqa: F811
+    _classify(db_path, FakeClassifier())
+    df = metrics.load(db_path, V2)
+    s = metrics.summary_by_format(df, total_label="전체").set_index("format")
+    assert list(s.index) == [*config.FORMATS, "전체"]           # 전체 행은 맨 아래
+    videos = metrics.dedupe_videos(df)
+    assert s.loc["전체", "video_count"] == len(videos) == 5
+    assert s.loc["전체", "views_median"] == pytest.approx(videos["views"].median())
+    assert math.isnan(s.loc["전체", "share"]) and not s.loc["전체", "sample_insufficient"]
+    text = obs.formats(metrics.summary_by_format(df, total_label="전체"), metrics.other_share(df))
+    assert text.startswith("분류 5개 중")                       # 전체 행은 포맷 비교에서 빠짐
+
+
+def test_reactions_by_format_has_total(db_path):  # noqa: F811
+    _classify(db_path, FakeClassifier())
+    r = metrics.summary_reactions(metrics.load(db_path, V2), by="format")
+    assert list(r["group"]) == [*config.FORMATS, "전체"]
+    assert r.loc[r["group"] == "전체", "video_count"].iloc[0] == 5
+
+
+def _row(title, desc="", tags="", conf="높음"):
+    return {"title": title, "description": desc, "hashtags": tags, "format_confidence": conf}
+
+
+def test_other_group_rules():
+    g = metrics.other_group
+    assert g(_row("DIY Buldak", tags='["papercraft"]')) == "종이 DIY"
+    assert g(_row("Ranking buldak made of PAPER")) == "종이 DIY"            # 앞 규칙 우선
+    assert g(_row("Ranking Truffle Flavor Buldak!")) == "랭킹·모음"
+    assert g(_row("x", desc="rank everything")) != "랭킹·모음"              # 랭킹은 제목만 봄
+    assert g(_row("Your Birthday Month = Your Buldak")) == "밈"
+    assert g(_row("Your Birth Month Picks Your Buldak!")) == "밈"
+    assert g(_row("funny", tags='["meme"]')) == "밈"
+    assert g(_row("Buldak Spring Roll", conf="낮음")) == "판단 불가 (제목·설명에 정보 부족)"
+    assert g(_row("eat #rockpaperscissors", conf="중간")) == "그 외"         # 가위바위보는 종이 DIY 아님
+
+
+def test_other_breakdown_and_note(db_path):  # noqa: F811
+    _classify(db_path, FakeClassifier())
+    df = metrics.load(db_path, V2)
+    b = metrics.other_breakdown(df)
+    assert list(b) == ["종이 DIY", "랭킹·모음", "밈", "판단 불가 (제목·설명에 정보 부족)", "그 외"] and sum(b.values()) == 1   # 기타 = D
+    assert metrics.other_breakdown_text(df).endswith("(기타 1개)")
+    assert metrics.format_note("기타", True).startswith("비교 제외")        # 비교 제외가 표본 부족보다 우선
+    assert metrics.format_note("챌린지", True) == "표본 부족" and metrics.format_note("챌린지") == ""
+
+
+# ---------------------------------------------------------------- v3.1: 회차 분류·다수결
+def _t(fmt, conf="높음", reason="r"):
+    return {"format": fmt, "confidence": conf, "reason": reason}
+
+
+def test_majority_rules():
+    m = cf.majority
+    assert m([_t("챌린지")] * 3)["agreement"] == 3
+    r = m([_t("레시피·조리", "중간", "r1"), _t("챌린지", "높음", "r2"), _t("챌린지", "낮음", "r3")])
+    assert (r["format"], r["confidence"], r["reason"], r["agreement"]) == ("챌린지", "높음", "r2", 2)
+    assert r["trial_formats"] == "레시피·조리/챌린지/챌린지"
+    r = m([_t("챌린지"), _t("레시피·조리"), _t("먹방·ASMR·맛평가")])
+    assert (r["format"], r["confidence"], r["agreement"]) == ("기타", "낮음", 1)   # 모두 다르면 기타
+
+
+def test_schema_order_reason_first():
+    assert list(cf.RESPONSE_SCHEMA["properties"]) == ["reason", "format", "confidence"]
+    assert cf.RESPONSE_SCHEMA["required"] == ["reason", "format", "confidence"]
+
+
+class FlakyClassifier(FakeClassifier):
+    """영상 A의 2회차 호출만 실패."""
+
+    def classify(self, text):
+        vid = text.split("title ")[1].split("\n")[0]
+        if vid == "A" and self.calls.count("A") == 1:
+            self.calls.append(vid)
+            raise cf.ParseError("JSON이 아님")
+        return super().classify(text)
+
+
+def test_failed_trial_retried_only(db_path):  # noqa: F811
+    r = _classify(db_path, FlakyClassifier())
+    assert r["classified"] == 4 and r["failed"] == 1                     # A는 최종 저장 안 함
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT COUNT(*) FROM video_formats WHERE video_id='A'").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM video_format_trials WHERE video_id='A'").fetchone()[0] == 2
+    conn.close()
+    clf = FakeClassifier()
+    r = _classify(db_path, clf)
+    assert r["classified"] == 1 and clf.calls == ["A"]                   # 빠진 회차 1번만 다시
+    conn = db.connect(db_path)
+    assert conn.execute("SELECT agreement FROM video_formats WHERE video_id='A'").fetchone()[0] == 3
+    conn.close()
+
+
+def test_boundary_label_and_text(db_path):  # noqa: F811
+    assert metrics.boundary_label(3) == "" and metrics.boundary_label(None) == ""
+    assert metrics.boundary_label(2) == "경계 (2/3)" and metrics.boundary_label(1) == "경계 (3회 모두 다름)"
+    _classify(db_path, FakeClassifier())
+    df = metrics.load(db_path, V2)
+    assert metrics.agreement_text(df).startswith("포맷 분류 3회 일치 5개 (100.0%) · 경계 사례 0개")
+
+
+# ---------------------------------------------------------------- 그래프 데이터
+def test_main_formats_ties_and_other():
+    mk = lambda fs: pd.DataFrame({"format": fs})  # noqa: E731
+    assert metrics.main_formats(mk(["챌린지", "챌린지", "기타"])) == ["챌린지"]
+    assert metrics.main_formats(mk(["기타", "레시피·조리"])) == ["레시피·조리", "기타"]   # 동률 → 둘 다, 정의 순서
+    assert metrics.main_formats(mk(["기타"])) == ["기타"]                               # 기타 주력은 그대로
+    assert metrics.main_formats(mk([None])) == [metrics.UNCLASSIFIED]
+
+
+def test_format_comparison_excludes_other(db_path):  # noqa: F811
+    _classify(db_path, FakeClassifier())
+    comp = metrics.format_comparison(metrics.load(db_path, V2))
+    assert metrics.chart_formats() == ["챌린지", "레시피·조리", "먹방·ASMR·맛평가"]
+    assert "기타" not in set(comp["format"])
+    assert list(comp["metric"].unique()) == [m[0] for m in metrics.COMPARISON_METRICS]
+    vpd = comp[comp["metric"] == "views_per_day"].set_index("format")
+    assert vpd["is_top"].sum() >= 1 and vpd.loc[vpd["value"].idxmax(), "is_top"]
+    assert (vpd["n"] == [2, 1, 1]).all()                                  # 챌린지 A·B, 레시피 C, 먹방 E
+    assert set(metrics.summary_by_channel(metrics.load(db_path, V2))["main_formats"].explode()) <= {
+        *config.FORMATS, metrics.UNCLASSIFIED}
+
+
+def test_format_comparison_tie_all_top():
+    import numpy as np
+    df = pd.DataFrame({"metric": ["m"] * 3, "value": [1.0, 1.0, 0.5]})
+    best = df.groupby("metric")["value"].transform("max")
+    assert list(np.isclose(df["value"], best)) == [True, True, False]   # format_comparison과 같은 판정
+
+
+def test_creator_scatter_excludes_other_and_small(db_path):  # noqa: F811
+    _classify(db_path, FakeClassifier())
+    pts = metrics.creator_scatter_data(metrics.load(db_path, V2))
+    assert "기타" not in set(pts["format_label"])
+    assert (pts["subscriber_count"] >= config.VPS_MIN_SUBSCRIBERS).all()
+
+
+# ---------------------------------------------------------------- 부트스트랩
+def _boot_df(values_by_format, channels_per_format=None):
+    import numpy as np
+    rows = []
+    for f, vals in values_by_format.items():
+        chans = (channels_per_format or {}).get(f) or [f"{f}-c{i}" for i in range(len(vals))]
+        for i, (v, ch) in enumerate(zip(vals, chans)):
+            row = {"keyword": "k", "video_id": f"{f}-{i}", "format": f, "channel_id": ch}
+            row.update({k: v for k, _ in metrics.BOOT_METRICS})
+            rows.append(row)
+    df = pd.DataFrame(rows)
+    return df.astype({k: float for k, _ in metrics.BOOT_METRICS}) if len(df) else df.assign(**{
+        k: np.nan for k, _ in metrics.BOOT_METRICS})
+
+
+def test_bootstrap_reproducible_and_contains_point():
+    import numpy as np
+    rng = np.random.default_rng(0)
+    df = _boot_df({f: list(rng.normal(10, 2, 30)) for f in metrics.chart_formats()} | {"기타": [100.0] * 5})
+    a = metrics.bootstrap_format_ci(df, n_boot=2000, seed=7)
+    b = metrics.bootstrap_format_ci(df, n_boot=2000, seed=7)
+    pd.testing.assert_frame_equal(a, b)                                        # 같은 시드 → 같은 결과
+    assert set(a["format"]) == set(metrics.chart_formats())                    # 기타 제외
+    assert len(a) == len(metrics.BOOT_METRICS) * 3 and (a["n"] == 30).all()
+    assert ((a["low"] <= a["value"]) & (a["value"] <= a["high"])).all()
+    c = metrics.bootstrap_format_ci(df, n_boot=2000, seed=8)
+    assert not a["low"].equals(c["low"])                                       # 시드가 다르면 달라짐
+
+
+def test_bootstrap_diffs_separated_vs_same():
+    import numpy as np
+    rng = np.random.default_rng(1)
+    same = list(rng.normal(10, 1, 40))
+    df = _boot_df({"챌린지": same, "레시피·조리": list(np.array(same) + 50), "먹방·ASMR·맛평가": same})
+    d = metrics.bootstrap_format_diffs(df, n_boot=2000, seed=3)
+    assert len(d) == len(metrics.BOOT_METRICS) * 3
+    far = d[(d["a"] == "챌린지") & (d["b"] == "레시피·조리")]
+    assert (~far["includes_zero"]).all() and (far["verdict"] == metrics.VERDICT_SURE).all()
+    eq = d[(d["a"] == "챌린지") & (d["b"] == "먹방·ASMR·맛평가")]
+    assert eq["includes_zero"].all() and (eq["verdict"] == metrics.VERDICT_NONE).all()
+    assert ((d["adj_low"] <= d["low"]) & (d["high"] <= d["adj_high"])).all()   # 보정 구간이 더 넓음
+
+
+def test_bootstrap_empty_format_and_channel_unit():
+    import numpy as np
+    df = _boot_df({"챌린지": [1.0, 2.0, 3.0, 4.0], "레시피·조리": [5.0, 6.0, 7.0, 8.0]},
+                  {"챌린지": ["x", "x", "y", "y"], "레시피·조리": ["p", "p", "p", "q"]})
+    ci = metrics.bootstrap_format_ci(df, n_boot=500, seed=1, unit="channel").set_index(["metric", "format"])
+    row = ci.loc[("views", "먹방·ASMR·맛평가")]
+    assert row["n"] == 0 and np.isnan(row["low"]) and np.isnan(row["high"])    # 영상 없는 포맷
+    d = metrics.bootstrap_format_diffs(df, n_boot=500, seed=1, unit="channel")
+    assert d[d["b"] == "먹방·ASMR·맛평가"]["verdict"].eq(metrics.VERDICT_NONE).all()
+    s = metrics.bootstrap_samples(df, n_boot=500, seed=1, unit="channel")
+    point, boot, n = s[("views", "챌린지")]
+    # 채널 x(1,2)·y(3,4)를 통째로 뽑으므로 가능한 중앙값은 1.5, 2.5, 3.5 셋뿐
+    assert n == 4 and set(np.round(boot, 6)) <= {1.5, 2.5, 3.5}
+
+
+def test_sure_pairs_text():
+    f1, f2, f3 = metrics.chart_formats()
+    diffs = pd.DataFrame({
+        "metric": ["m1", "m1", "m1", "m2"], "a": [f1, f1, f2, f1], "b": [f2, f3, f3, f2],
+        "diff": [5.0, -2.0, 1.0, 3.0],
+        "verdict": [metrics.VERDICT_SURE, metrics.VERDICT_SURE, metrics.VERDICT_MAYBE, metrics.VERDICT_MAYBE],
+    })
+    assert metrics.sure_pairs(diffs, "m1") == [(f1, f2), (f3, f1)]            # 부호로 방향, 우연일 수 있음은 제외
+    short = {f1: "챌린지", f2: "레시피", f3: "먹방"}
+    assert metrics.sure_pairs_text(diffs, "m1", short) == "확실한 차이: 챌린지 > 레시피 · 먹방 > 챌린지"
+    assert metrics.sure_pairs_text(diffs, "m2", short) == metrics.NO_SURE_LABEL == "포맷 간 확실한 차이 없음"

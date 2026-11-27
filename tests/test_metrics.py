@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import config  # noqa: E402
 import db  # noqa: E402
 import metrics  # noqa: E402
 
@@ -28,7 +29,9 @@ def _run(conn, run_id, mode, criteria):
 
 
 @pytest.fixture
-def db_path(tmp_path):
+def db_path(tmp_path, monkeypatch):
+    # fixture 데이터는 V2 기준 이름으로 저장 → 수집·분류 함수가 읽는 현재 기준도 V2로 맞춤 (실제 설정과 무관)
+    monkeypatch.setattr(config, "CRITERIA", V2)
     path = tmp_path / "t.db"
     conn = db.connect(path)
     _run(conn, R1, "search", V2)

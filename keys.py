@@ -35,6 +35,9 @@ _KEY_FRAGMENT_PATTERNS = [
     re.compile(r"\bkey_[A-Za-z0-9_\-\*]{4,}"),
     re.compile(r"AIza[0-9A-Za-z_\-\*]{6,}"),
     re.compile(r"([?&]key=)[^&\s\"']+"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_\*]{6,}"),            # GitHub fine-grained 토큰
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9\*]{6,}"),              # GitHub classic 토큰
+    re.compile(r"(Authorization:?\s*(?:Bearer|token)\s+)\S+", re.I),
 ]
 
 

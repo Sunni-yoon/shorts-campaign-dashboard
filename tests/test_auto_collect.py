@@ -4,8 +4,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import pytest  # noqa: E402
+
 import auto_collect  # noqa: E402
 import collect  # noqa: E402
+import config  # noqa: E402
 import db  # noqa: E402
 import keys  # noqa: E402
 import metrics  # noqa: E402
@@ -13,6 +16,12 @@ from test_metrics import V2, _run, _video, db_path  # noqa: E402,F401
 
 FAKE_KEY = "FAKE-TEST-KEY-not-a-real-key-0123456789"   # 실제 키 형식(AIza…)과 다르게
 NOW = datetime(2026, 11, 26, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _criteria_v2(monkeypatch):
+    """가짜 수집기는 V2 기준 이름으로 실행을 기록 → 판단 로직이 읽는 현재 기준도 V2로 맞춤."""
+    monkeypatch.setattr(config, "CRITERIA", V2)
 
 
 # ---------------------------------------------------------------- keys

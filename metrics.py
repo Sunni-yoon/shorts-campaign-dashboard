@@ -10,9 +10,11 @@
 지표는 영상별 가장 최근 스냅샷 (그 뒤의 refresh 포함).
 
 데이터 단위: 행 = (키워드, 영상). 한 영상이 여러 키워드에 속하면 키워드마다 한 행.
+(v3는 키워드가 buldak 하나라 행 = 영상. 대시보드 비교 기준은 포맷)
 영상 단위 집계(전체 요약, 제외 수, 상위 영상)는 video_id로 중복을 제거한다.
 """
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -40,7 +42,7 @@ SHORT_DESCRIPTIONS = {
 
 # 지표 설명 — 긴 버전: 요약표 열 툴팁·데이터 기준 안내·리포트용
 DESCRIPTIONS = {
-    "video_count": "선택한 키워드의 v2 쇼츠 수 (여러 키워드에 걸친 영상은 1개로 셈)",
+    "video_count": f"이번 수집(키워드 {', '.join(config.KEYWORDS)})의 쇼츠 수 (영상 중복 제거)",
     "views": "영상들을 조회수 순으로 세웠을 때 가운데 값",
     "views_per_day": "조회수 ÷ 업로드 후 경과 일수, 업로드 후 지금까지의 하루 평균 조회수",
     "engagement_rate": "(좋아요 + 댓글) ÷ 조회수, 좋아요·댓글 숨김 영상 제외",
@@ -96,11 +98,12 @@ latest AS (
     FROM video_snapshots s
     WHERE s.video_id IN (SELECT video_id FROM targets)
 )
-SELECT t.keyword, v.video_id, v.title, v.published_at, v.duration_sec,
+SELECT t.keyword, v.video_id, v.title, v.description, v.hashtags, v.published_at, v.duration_sec,
        v.embed_width, v.embed_height, v.channel_id, c.title AS channel_title,
        l.run_id AS snapshot_run_id, l.collected_at,
        l.view_count, l.like_count, l.comment_count,
-       f.format, f.confidence AS format_confidence, f.reason AS format_reason, f.model AS format_model
+       f.format, f.confidence AS format_confidence, f.reason AS format_reason, f.model AS format_model,
+       f.agreement AS format_agreement, f.trial_formats AS format_trials
 FROM targets t
 JOIN videos v ON v.video_id = t.video_id
 JOIN latest l ON l.video_id = t.video_id AND l.rn = 1
@@ -232,6 +235,16 @@ def summary_by_keyword(df: pd.DataFrame, total_label: str = "전체") -> pd.Data
     return pd.DataFrame(rows)
 
 
+def main_formats(videos: pd.DataFrame) -> list[str]:
+    """채널 영상 중 가장 많은 포맷 (동률이면 모두, 정의된 포맷 순서). 기타·미분류도 그대로."""
+    labels = _format_labels(videos)
+    if labels.empty:
+        return []
+    counts = labels.value_counts()
+    top = counts[counts == counts.max()].index
+    return [f for f in [*config.FORMATS, UNCLASSIFIED] if f in top]
+
+
 def summary_by_channel(df: pd.DataFrame) -> pd.DataFrame:
     """채널 단위 집계 (영상 중복 제거 후). 구독자 대비 조회수 중앙값 높은 순, 값 없음은 맨 아래.
 
@@ -240,7 +253,7 @@ def summary_by_channel(df: pd.DataFrame) -> pd.DataFrame:
     """
     cols = ["channel_id", "channel_title", "subscriber_count", "subscriber_hidden", "video_count",
             "views_per_subscriber_median", "engagement_rate_median", "engagement_rate_n",
-            "rep_video_id", "rep_title", "rep_url", "rep_views_per_subscriber", "single_video"]
+            "rep_video_id", "rep_title", "rep_url", "rep_views_per_subscriber", "single_video", "main_formats"]
     videos = dedupe_videos(df)
     videos = videos[videos["channel_id"].notna()]
     if videos.empty:
@@ -267,6 +280,7 @@ def summary_by_channel(df: pd.DataFrame) -> pd.DataFrame:
             "rep_url": rep["url"],
             "rep_views_per_subscriber": rep["views_per_subscriber"],
             "single_video": len(g) == 1,
+            "main_formats": main_formats(g),
         })
     out = pd.DataFrame(rows, columns=cols)
     return out.sort_values("views_per_subscriber_median", ascending=False, na_position="last",
@@ -281,10 +295,12 @@ def _format_labels(df: pd.DataFrame) -> pd.Series:
     return col.fillna(UNCLASSIFIED)
 
 
-def summary_by_format(df: pd.DataFrame, min_sample: int = config.FORMAT_MIN_SAMPLE) -> pd.DataFrame:
+def summary_by_format(df: pd.DataFrame, min_sample: int = config.FORMAT_MIN_SAMPLE,
+                      total_label: str | None = None) -> pd.DataFrame:
     """포맷별 요약 (영상 중복 제거). 정의된 포맷 순서대로, 미분류는 있으면 마지막.
 
-    share: 분류된 영상 중 비율 (미분류 행은 NaN) / sample_insufficient: 영상 수 < min_sample
+    share: 분류된 영상 중 비율 (미분류·전체 행은 NaN) / sample_insufficient: 영상 수 < min_sample
+    total_label을 주면 맨 아래에 전체(미분류 포함) 행 추가 — 포맷별 값을 비교할 기준선
     """
     videos = dedupe_videos(df)
     videos = videos.assign(format=_format_labels(videos))
@@ -301,6 +317,8 @@ def summary_by_format(df: pd.DataFrame, min_sample: int = config.FORMAT_MIN_SAMP
             "share": (len(g) / classified if classified else np.nan) if fmt != UNCLASSIFIED else np.nan,
             "sample_insufficient": fmt != UNCLASSIFIED and len(g) < min_sample,
         })
+    if total_label is not None and not videos.empty:
+        rows.append({"format": total_label, **_stats(videos), "share": np.nan, "sample_insufficient": False})
     return pd.DataFrame(rows)
 
 
@@ -312,6 +330,252 @@ def keyword_format_table(df: pd.DataFrame) -> pd.DataFrame:
     table = table.reindex(columns=columns, fill_value=0)
     table["합계"] = table.sum(axis=1)
     return table
+
+
+def other_group(row) -> str:
+    """기타 영상 한 개의 구성 그룹 (config.OTHER_GROUPS를 위에서부터 적용)."""
+    title = str(row.get("title") or "").lower()
+    text = " ".join(str(row.get(k) or "") for k in ("title", "description", "hashtags")).lower()
+    for name, field, pattern in config.OTHER_GROUPS:
+        if field == "low_confidence":
+            if row.get("format_confidence") == "낮음":
+                return name
+        elif re.search(pattern, title if field == "title" else text):
+            return name
+    return config.OTHER_GROUP_REST
+
+
+def other_breakdown(df: pd.DataFrame) -> dict[str, int]:
+    """기타로 분류된 영상(중복 제거)의 구성 그룹별 개수 — 정의된 그룹 순서, 0개도 포함."""
+    videos = dedupe_videos(df)
+    other = videos[_format_labels(videos) == "기타"]
+    counts = other.apply(other_group, axis=1).value_counts() if not other.empty else pd.Series(dtype=int)
+    names = [g[0] for g in config.OTHER_GROUPS] + [config.OTHER_GROUP_REST]
+    return {n: int(counts.get(n, 0)) for n in names}
+
+
+def other_breakdown_text(df: pd.DataFrame) -> str:
+    """예: '종이 DIY 17 · 랭킹·모음 6 · 밈 5 · 판단 불가 (제목·설명에 정보 부족) 7 · 그 외 5 (기타 40개)'."""
+    b = other_breakdown(df)
+    return " · ".join(f"{k} {v}" for k, v in b.items()) + f" (기타 {sum(b.values())}개)"
+
+
+def boundary_label(agreement, trials: int | None = None) -> str:
+    """경계 사례 표시: 회차 결과가 모두 같지 않으면 '경계 (2/3)' 또는 '경계 (3회 모두 다름)'. 단일 분류(NULL)는 빈 칸."""
+    trials = trials or config.FORMAT_TRIALS
+    if agreement is None or pd.isna(agreement) or int(agreement) >= trials:
+        return ""
+    n = int(agreement)
+    return f"경계 ({trials}회 모두 다름)" if n < 2 else f"경계 ({n}/{trials})"
+
+
+def agreement_text(df: pd.DataFrame) -> str:
+    """예: '포맷 분류 3회 일치 170개 (85.0%) · 경계 사례 30개 (2/3 일치 28 · 모두 다름 2)'."""
+    videos = dedupe_videos(df)
+    a = pd.to_numeric(videos.get("format_agreement"), errors="coerce").dropna()
+    if a.empty:
+        return "회차 분류 기록 없음"
+    t = config.FORMAT_TRIALS
+    full, tie = int((a >= t).sum()), int((a < 2).sum())
+    return (f"포맷 분류 {t}회 일치 {full}개 ({full / len(a):.1%}) · 경계 사례 {len(a) - full}개 "
+            f"({t - 1}/{t} 일치 {len(a) - full - tie} · 모두 다름 {tie})")
+
+
+EXCLUDED_NOTE = "비교 제외 — 내용이 섞인 묶음 (데이터 기준 참고)"
+
+
+def format_note(fmt: str, sample_insufficient: bool = False) -> str:
+    """포맷 비교 표의 비고: 비교 제외 포맷 > 표본 부족 > 빈 칸."""
+    if fmt == config.FORMAT_EXCLUDED_FROM_COMPARISON:
+        return EXCLUDED_NOTE
+    return "표본 부족" if sample_insufficient else ""
+
+
+def chart_formats() -> list[str]:
+    """그래프에 그리는 포맷 (정의된 순서, 비교 제외 포맷 빼고)."""
+    return [f for f in config.FORMATS if f != config.FORMAT_EXCLUDED_FROM_COMPARISON]
+
+
+# 포맷 비교 그래프: (지표 키, 제목, 통계) — 구매의향은 중앙값이 대부분 0이라 평균
+COMPARISON_METRICS = [
+    ("views_per_day", "조회수 속도 (중앙값, 회/일)", "median"),
+    ("views_per_subscriber", "구독자 대비 조회수 (중앙값)", "median"),
+    ("engagement_rate", "참여율 (중앙값)", "median"),
+    ("purchase_rate", "구매의향 비율 (평균)", "mean"),
+]
+
+
+def format_comparison(df: pd.DataFrame) -> pd.DataFrame:
+    """포맷 비교 그래프용 긴 표: metric, title, format, value, n, is_top (최댓값, 동률이면 모두 True)."""
+    fsum = summary_by_format(df).set_index("format")
+    react = summary_reactions(df, by="format")
+    react = react.set_index("group") if not react.empty else react
+    rows = []
+    for key, title, stat in COMPARISON_METRICS:
+        for f in chart_formats():
+            if key in REACTION_RATES:
+                ok = not react.empty and f in react.index
+                value = react.loc[f, f"{key}_{stat}"] if ok else np.nan
+                n = int(react.loc[f, "videos_analyzed"]) if ok else 0
+            else:
+                ok = f in fsum.index
+                value = fsum.loc[f, f"{key}_{stat}"] if ok else np.nan
+                n = int(fsum.loc[f, f"{key}_n"]) if ok else 0
+            rows.append({"metric": key, "title": title, "format": f, "value": value, "n": n})
+    out = pd.DataFrame(rows, columns=["metric", "title", "format", "value", "n"])
+    best = out.groupby("metric")["value"].transform("max")
+    out["is_top"] = out["value"].notna() & np.isclose(out["value"], best)
+    return out
+
+
+def sentiment_mix(df: pd.DataFrame) -> pd.DataFrame:
+    """포맷별 감성 구성 (영상별 비율의 평균). 중립 = 1 − 긍정 − 부정 (감성은 셋 중 하나). n = 분석 영상 수."""
+    react = summary_reactions(df, by="format")
+    rows = []
+    for f in chart_formats():
+        r = react[react["group"] == f] if not react.empty else react
+        if r.empty or r.iloc[0]["videos_analyzed"] == 0:
+            continue
+        r = r.iloc[0]
+        pos, neg = r["positive_rate_mean"], r["negative_rate_mean"]
+        rows.append({"format": f, "긍정": pos, "중립": max(0.0, 1 - pos - neg), "부정": neg,
+                     "n": int(r["videos_analyzed"])})
+    return pd.DataFrame(rows, columns=["format", "긍정", "중립", "부정", "n"])
+
+
+def creator_scatter_data(df: pd.DataFrame, channel_ids=None) -> pd.DataFrame:
+    """크리에이터 산점도용 영상: 비교 제외 포맷·미분류, 구독자 비공개·VPS_MIN_SUBSCRIBERS 미만·조회수 0 제외."""
+    v = dedupe_videos(df)
+    v = v.assign(format_label=_format_labels(v))
+    keep = (v["format_label"].isin(chart_formats()) & v["subscriber_count"].notna()
+            & (v["subscriber_count"] >= config.VPS_MIN_SUBSCRIBERS) & (v["views"] > 0))
+    if "subscriber_hidden" in v:
+        keep &= v["subscriber_hidden"].fillna(0) != 1
+    if channel_ids is not None:
+        keep &= v["channel_id"].isin(set(channel_ids))
+    return v[keep]
+
+
+# ---------------------------------------------------------------- 부트스트랩 신뢰구간 (포맷 비교)
+# (지표 키, 통계) — 포맷 비교 표·그래프와 같은 통계. 구매의향은 중앙값이 대부분 0이라 평균
+BOOT_METRICS = [
+    ("views", "median"), ("views_per_day", "median"), ("engagement_rate", "median"),
+    ("views_per_subscriber", "median"), ("positive_rate", "median"), ("negative_rate", "median"),
+    ("purchase_rate", "mean"),
+]
+BOOT_N, BOOT_SEED = 10_000, 42
+BOOT_NOTE = "마우스를 올리면 95% 신뢰구간(부트스트랩 1만 회)이 보임"
+VERDICT_SURE = "확실한 차이"          # 보정(Bonferroni) 구간도 0을 포함하지 않음
+VERDICT_MAYBE = "우연일 수 있는 차이"  # 95% 구간은 0을 포함하지 않지만 보정 구간은 포함
+VERDICT_NONE = "차이 확인 안 됨"      # 95% 구간이 0을 포함
+
+
+def _boot_stat(sample: np.ndarray, stat: str) -> np.ndarray:
+    """(B, m) 표본 행렬 → 행별 통계. 채널 단위는 빈 칸을 NaN으로 채우므로 nan 함수 사용."""
+    return np.nanmedian(sample, axis=1) if stat == "median" else np.nanmean(sample, axis=1)
+
+
+def bootstrap_samples(df: pd.DataFrame, n_boot: int = BOOT_N, seed: int = BOOT_SEED,
+                      unit: str = "video") -> dict:
+    """{(지표, 포맷): (점추정, 부트스트랩 통계 배열, n)}. 포맷마다 따로, 그 지표 값이 있는 영상만 다시 뽑음.
+
+    unit='video': 영상을 복원 추출 / unit='channel': 채널을 복원 추출하고 뽑힌 채널의 영상을 모두 포함
+    난수는 (seed, 지표 순번, 포맷 순번)으로 고정 → 일부만 계산해도 같은 결과
+    """
+    videos = dedupe_videos(df)
+    videos = videos.assign(format_label=_format_labels(videos))
+    out = {}
+    for mi, (key, stat) in enumerate(BOOT_METRICS):
+        if key not in videos:
+            continue
+        for fi, f in enumerate(chart_formats()):
+            g = videos[(videos["format_label"] == f) & videos[key].notna()]
+            values = g[key].to_numpy(dtype=float)
+            n = len(values)
+            if n == 0:
+                out[(key, f)] = (np.nan, np.full(n_boot, np.nan), 0)
+                continue
+            point = float(np.median(values) if stat == "median" else np.mean(values))
+            rng = np.random.default_rng([seed, mi, fi])
+            if unit == "channel":
+                groups = [grp[key].to_numpy(dtype=float)
+                          for _, grp in g.groupby(g["channel_id"].fillna(g["video_id"]))]
+                width = max(len(x) for x in groups)
+                padded = np.full((len(groups), width), np.nan)
+                for i, x in enumerate(groups):
+                    padded[i, : len(x)] = x
+                pick = rng.integers(0, len(groups), size=(n_boot, len(groups)))
+                sample = padded[pick].reshape(n_boot, -1)
+            else:
+                sample = values[rng.integers(0, n, size=(n_boot, n))]
+            out[(key, f)] = (point, _boot_stat(sample, stat), n)
+    return out
+
+
+def bootstrap_format_ci(df: pd.DataFrame, n_boot: int = BOOT_N, seed: int = BOOT_SEED,
+                        alpha: float = 0.05, unit: str = "video", samples: dict | None = None) -> pd.DataFrame:
+    """지표 × 포맷의 점추정과 (1−alpha) 백분위 신뢰구간: metric, format, value, low, high, n."""
+    samples = samples if samples is not None else bootstrap_samples(df, n_boot, seed, unit)
+    rows = []
+    for (key, f), (point, boot, n) in samples.items():
+        ok = n > 0 and np.isfinite(boot).any()
+        lo, hi = (np.nanquantile(boot, [alpha / 2, 1 - alpha / 2]) if ok else (np.nan, np.nan))
+        rows.append({"metric": key, "format": f, "value": point, "low": lo, "high": hi, "n": n})
+    return pd.DataFrame(rows, columns=["metric", "format", "value", "low", "high", "n"])
+
+
+def bootstrap_format_diffs(df: pd.DataFrame, n_boot: int = BOOT_N, seed: int = BOOT_SEED,
+                           alpha: float = 0.05, unit: str = "video", samples: dict | None = None,
+                           n_comparisons: int | None = None) -> pd.DataFrame:
+    """포맷 쌍(정의 순서 a−b)마다 통계량 차이의 신뢰구간과 0 포함 여부.
+
+    adj_*: 여러 번 비교 보정(Bonferroni, alpha / 비교 수) 구간. 비교 수 기본값 = 지표 수 × 포맷 쌍 수
+    verdict: 확실한 차이(보정 구간도 0 미포함) / 우연일 수 있는 차이(95%만 0 미포함) / 차이 확인 안 됨
+    """
+    samples = samples if samples is not None else bootstrap_samples(df, n_boot, seed, unit)
+    fmts = chart_formats()
+    pairs = [(fmts[i], fmts[j]) for i in range(len(fmts)) for j in range(i + 1, len(fmts))]
+    metrics_ = list(dict.fromkeys(k for k, _ in samples))
+    m = n_comparisons or len(metrics_) * len(pairs)
+    adj = alpha / m
+    rows = []
+    for key in metrics_:
+        for a, b in pairs:
+            pa, ba, na = samples[(key, a)]
+            pb, bb, nb = samples[(key, b)]
+            d = ba - bb
+            ok = na > 0 and nb > 0 and np.isfinite(d).any()
+            lo, hi = np.nanquantile(d, [alpha / 2, 1 - alpha / 2]) if ok else (np.nan, np.nan)
+            alo, ahi = np.nanquantile(d, [adj / 2, 1 - adj / 2]) if ok else (np.nan, np.nan)
+            zero = not ok or lo <= 0 <= hi
+            adj_zero = not ok or alo <= 0 <= ahi
+            rows.append({"metric": key, "a": a, "b": b, "diff": pa - pb, "low": lo, "high": hi,
+                         "includes_zero": zero, "adj_low": alo, "adj_high": ahi, "adj_includes_zero": adj_zero,
+                         "verdict": VERDICT_NONE if zero else (VERDICT_MAYBE if adj_zero else VERDICT_SURE)})
+    return pd.DataFrame(rows)
+
+
+SURE_RULE = ("그래프 아래 '확실한 차이'는 채널 단위 부트스트랩(1만 회)에서 21번 비교를 보정한 구간도 "
+             "0을 포함하지 않는 포맷 쌍만 표시 (막대 높이만으로 순위를 정하지 않음)")
+NO_SURE_LABEL = "포맷 간 확실한 차이 없음"
+
+
+def sure_pairs(diffs: pd.DataFrame, metric: str) -> list[tuple[str, str]]:
+    """해당 지표에서 '확실한 차이'인 포맷 쌍 [(높은 포맷, 낮은 포맷)], 정의된 포맷 쌍 순서.
+
+    diffs: bootstrap_format_diffs 결과 (대시보드는 채널 단위). diff = a − b 이므로 부호로 방향을 정함
+    """
+    d = diffs[(diffs["metric"] == metric) & (diffs["verdict"] == VERDICT_SURE)]
+    return [(r.a, r.b) if r.diff > 0 else (r.b, r.a) for r in d.itertuples()]
+
+
+def sure_pairs_text(diffs: pd.DataFrame, metric: str, short: dict | None = None) -> str:
+    """예: '확실한 차이: 챌린지 > 먹방' / 없으면 '포맷 간 확실한 차이 없음'."""
+    name = (short or {}).get
+    pairs = sure_pairs(diffs, metric)
+    if not pairs:
+        return NO_SURE_LABEL
+    return "확실한 차이: " + " · ".join(f"{name(hi) or hi} > {name(lo) or lo}" for hi, lo in pairs)
 
 
 def other_share(df: pd.DataFrame) -> tuple[float, int, int]:

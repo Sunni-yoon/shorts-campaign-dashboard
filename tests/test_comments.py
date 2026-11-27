@@ -184,3 +184,10 @@ def test_failed_calls_counted_in_cost(db_path):  # noqa: F811
     r = _classify(db_path, FakeClassifier(fail=err))
     assert r["classified"] == 0 and r["failed"] == 14 and not r["stopped"]
     assert r["usage"]["input"] == 14 * 300 and r["cost_usd"] > 0     # 실패해도 과금된 토큰은 집계
+
+
+def test_sentiment_definitions_in_prompt():
+    import classify_comments as cc
+    assert list(cc.SENTIMENT_DEFINITIONS) == ["긍정", "부정", "중립"]          # 프롬프트 줄 순서 유지
+    for k, v in cc.SENTIMENT_DEFINITIONS.items():
+        assert f"- {k}: {v}\n" in cc.SYSTEM_PROMPT                             # 대시보드 설명과 같은 문구

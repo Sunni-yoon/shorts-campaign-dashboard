@@ -1,4 +1,4 @@
-"""대시보드를 열 때 데이터 신선도를 확인하고, 필요하면 v2 기준으로 새로 검색한다.
+"""대시보드를 열 때 데이터 신선도를 확인하고, 필요하면 현재 수집 기준(config.CRITERIA)으로 새로 검색한다.
 
 - 수집은 누군가 앱을 열었을 때만 일어난다 (백그라운드 타이머 없음)
 - 마지막 성공 search 후 config.REFRESH_HOURS(24시간)가 지났거나 데이터가 없으면 수집
@@ -110,7 +110,7 @@ def pending_format_count(db_path: Path) -> int:
 
 def ensure_formats(state: CollectorState, db_path: Path, progress=None, now=None,
                    api_key_getter=lambda: keys.get_api_key(keys.OPENAI_KEY_NAME), classifier=None) -> dict:
-    """최신 v2 실행의 미분류 쇼츠만 분류. 반환: action = none | classified | failed | retry_wait | no_key | disabled."""
+    """최신 실행(현재 수집 기준)의 미분류 쇼츠만 분류. 반환: action = none | classified | failed | retry_wait | no_key | disabled."""
     now = now or datetime.now(timezone.utc)
     if pending_format_count(db_path) == 0:
         return {"action": "none", "error": None}
