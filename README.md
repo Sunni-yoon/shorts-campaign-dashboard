@@ -4,6 +4,8 @@
 
 **대시보드:** https://shorts-campaign-dashboard-fiegkrrdeazp5sdzj3gbxm.streamlit.app/
 
+> 무료 호스팅이라 한동안 접속이 없으면 앱이 잠듭니다. "Yes, get this app back up!" 버튼을 누르면 30초~1분 뒤 열립니다.
+
 대시보드는 결정 질문 순서로 구성되어 있습니다.
 
 1. **전체 기준선은?** 영상 수와 조회수·조회수 속도·참여율·구독자 대비 조회수의 중앙값
